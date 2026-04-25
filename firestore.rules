@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Capture standard data shortcuts
+    function incomingData() {
+      return request.resource.data;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Members collection
+    match /members/{memberId} {
+      allow read, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(memberId) &&
+        incomingData().keys().hasAll(['id', 'name', 'startDate', 'endDate', 'status']) &&
+        incomingData().name is string && incomingData().name.size() > 0 &&
+        incomingData().name.size() <= 100;
+      allow update: if isSignedIn() &&
+        incomingData().diff(resource.data).affectedKeys().hasAny(['name', 'phone', 'startDate', 'endDate', 'status', 'sessionsCount', 'attendedCount', 'absentCount', 'compensationSessions', 'grade', 'subjects', 'price', 'paidAmount', 'paymentMethod', 'paymentDate', 'subscriptionDays', 'teacherName']);
+      allow delete: if isSignedIn();
+    }
+
+    // Courses collection
+    match /courses/{courseId} {
+      allow read, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(courseId) &&
+        incomingData().keys().hasAll(['id', 'title', 'instructor', 'status']) &&
+        incomingData().title is string && incomingData().title.size() <= 200;
+      allow update: if isSignedIn() &&
+        incomingData().diff(resource.data).affectedKeys().hasAny(['title', 'instructor', 'startDate', 'endDate', 'capacity', 'enrolledCount', 'status', 'price', 'description']);
+      allow delete: if isSignedIn();
+    }
+
+    // Trainees collection
+    match /trainees/{traineeId} {
+      allow read, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(traineeId) &&
+        incomingData().keys().hasAll(['id', 'courseId', 'fullName', 'date']) &&
+        incomingData().fullName is string && incomingData().fullName.size() <= 100;
+      allow update: if isSignedIn() &&
+        incomingData().diff(resource.data).affectedKeys().hasAny(['fullName', 'motherPhone', 'duration', 'amount', 'paymentMethod', 'date', 'notes']);
+      allow delete: if isSignedIn();
+    }
+
+    // Attendance collection
+    match /attendance/{attendanceId} {
+      allow read, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(attendanceId) &&
+        incomingData().keys().hasAll(['id', 'memberId', 'date', 'status']);
+      allow update: if isSignedIn() &&
+        incomingData().diff(resource.data).affectedKeys().hasAny(['status']);
+      allow delete: if isSignedIn();
+    }
+
+    // Settings collection
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+  }
+}

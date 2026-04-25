@@ -1,0 +1,116 @@
+{
+  "entities": {
+    "Member": {
+      "title": "Member",
+      "description": "Represents a student or member of the cooperative.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "expired", "pending"] },
+        "sessionsCount": { "type": "number" },
+        "attendedCount": { "type": "number" },
+        "absentCount": { "type": "number" },
+        "compensationSessions": { "type": "number" },
+        "grade": { "type": "string" },
+        "subjects": { "type": "string" },
+        "price": { "type": "string" },
+        "paidAmount": { "type": "string" },
+        "paymentMethod": { "type": "string", "enum": ["كاش", "حوالة", "لم يتم الدفع"] },
+        "paymentDate": { "type": "string" },
+        "subscriptionDays": { "type": "number" },
+        "teacherName": { "type": "string" }
+      },
+      "required": ["id", "name", "startDate", "endDate", "status"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "Represents a course or workshop offered by the cooperative.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "instructor": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "capacity": { "type": "number" },
+        "enrolledCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "upcoming", "completed"] },
+        "price": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "title", "instructor", "status"]
+    },
+    "Trainee": {
+      "title": "Trainee",
+      "description": "Represents a registered trainee in a specific course.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "motherPhone": { "type": "string" },
+        "duration": { "type": "string" },
+        "amount": { "type": "string" },
+        "paymentMethod": { "type": "string", "enum": ["كاش", "حوالة", "لم يتم الدفع"] },
+        "date": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "courseId", "fullName", "date"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Represents a member's attendance status for a specific date.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "memberId": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["present", "absent", "absent_compensated", "compensated"] }
+      },
+      "required": ["id", "memberId", "date", "status"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global application settings including icon mappings.",
+      "type": "object",
+      "properties": {
+        "icons": {
+          "type": "object",
+          "properties": {
+            "activeMember": { "type": "string" },
+            "expiredMember": { "type": "string" },
+            "present": { "type": "string" },
+            "absent": { "type": "string" },
+            "compensation": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "members": {
+      "schema": "Member",
+      "description": "Collection of all members/students."
+    },
+    "courses": {
+      "schema": "Course",
+      "description": "Collection of available courses and workshops."
+    },
+    "trainees": {
+      "schema": "Trainee",
+      "description": "Collection of trainees enrolled in courses."
+    },
+    "attendance": {
+      "schema": "AttendanceRecord",
+      "description": "Collection of attendance logs."
+    },
+    "settings": {
+      "schema": "AppSettings",
+      "description": "Collection for overall app settings (document: global)."
+    }
+  }
+}

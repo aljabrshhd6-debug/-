@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --color-natural-bg: #F7F5F2;
+  --color-natural-sidebar: #4A5D4E;
+  --color-natural-accent: #D98C72;
+  --color-natural-primary: #333333;
+  --color-natural-secondary: #6B705C;
+  --color-natural-border: #E0E0D5;
+  --color-natural-success: #84A98C;
+
+  --font-sans: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-natural-bg text-natural-primary antialiased;
+  }
+}
