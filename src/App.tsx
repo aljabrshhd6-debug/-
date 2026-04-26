@@ -5,6 +5,9 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
+  Eye,
+  EyeOff,
+  Lock,
   LayoutDashboard, 
   Users, 
   CheckSquare, 
@@ -54,7 +57,9 @@ import {
   updateDoc, 
   deleteDoc, 
   onSnapshot, 
-  query 
+  query,
+  handleFirestoreError,
+  OperationType
 } from './lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
@@ -86,18 +91,21 @@ const DEFAULT_SETTINGS: AppSettings = {
     present: 'Check',
     absent: 'X',
     compensation: 'RefreshCw'
-  }
+  },
+  financialPassword: '1234',
+  teachers: ['أ. ندى', 'أ. مشاعل', 'أ. ليلى', 'أ. احمد', 'أ. علي']
 };
 
-const TEACHERS = ['أ. ندى', 'أ. مشاعل', 'أ. ليلى', 'أ. احمد', 'أ. علي'];
-
-type TeacherView = 'members_nada' | 'members_mashael' | 'members_layla' | 'members_ahmed' | 'members_ali' | 'attendance_nada' | 'attendance_mashael' | 'attendance_layla' | 'attendance_ahmed' | 'attendance_ali';
-type View = 'dashboard' | 'courses' | 'courses_list' | 'courses_add' | 'courses_trainees' | 'courses_trainee_add' | 'course_fun' | 'course_rose' | 'course_bread' | 'attendance' | 'members' | 'compensation' | 'expiry' | 'settings' | 'about' | TeacherView;
+type View = 'dashboard' | 'accountant' | 'courses' | 'courses_list' | 'courses_add' | 'courses_trainees' | 'courses_trainee_add' | 'course_fun' | 'course_rose' | 'course_bread' | 'attendance' | 'members' | 'compensation' | 'expiry' | 'settings' | 'about' | string;
 
 export default function App() {
   const [view, setView] = useState<View>('dashboard');
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [showTotalAmount, setShowTotalAmount] = useState(false);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [notif, setNotif] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -118,34 +126,55 @@ export default function App() {
     setTimeout(() => setNotif(null), 3000);
   };
 
+  const verifyPassword = () => {
+    const SECRET_PASSWORD = settings.financialPassword || '1234'; 
+    if (passwordInput === SECRET_PASSWORD) {
+      setShowTotalAmount(true);
+      setIsPasswordModalOpen(false);
+      setPasswordInput('');
+      setPasswordError(false);
+      showNotif('تم عرض المبالغ بنجاح', 'success');
+    } else {
+      setPasswordError(true);
+    }
+  };
+
   // Data Listeners
   useEffect(() => {
-    if (!user) return;
-
     const unsubMembers = onSnapshot(collection(db, 'members'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Member));
       setMembers(data.sort((a, b) => (b.id > a.id ? 1 : -1)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'members');
     });
 
     const unsubCourses = onSnapshot(collection(db, 'courses'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Course));
       setCourses(data.sort((a, b) => (b.id > a.id ? 1 : -1)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'courses');
     });
 
     const unsubTrainees = onSnapshot(collection(db, 'trainees'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Trainee));
       setTrainees(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'trainees');
     });
 
     const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
       setAttendance(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'attendance');
     });
 
     const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
       if (snapshot.exists()) {
         setSettings(snapshot.data() as AppSettings);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/global');
     });
 
     return () => {
@@ -155,7 +184,7 @@ export default function App() {
       unsubAttendance();
       unsubSettings();
     };
-  }, [user]);
+  }, []);
 
   const [newCourse, setNewCourse] = useState<Partial<Course>>({
     title: '',
@@ -250,7 +279,11 @@ export default function App() {
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMember.name || !newMember.endDate) return;
+    
+    if (!newMember.name || !newMember.startDate || !newMember.endDate) {
+      showNotif('يرجى ملء جميع الحقول المطلوبة (الاسم، تاريخ البدء، تاريخ الانتهاء)', 'error');
+      return;
+    }
 
     const id = Math.random().toString(36).substr(2, 9);
     const member: Member = {
@@ -295,7 +328,7 @@ export default function App() {
       });
     } catch (err) {
       console.error("Error adding member:", err);
-      showNotif('فشل في إضافة المشترك', 'error');
+      handleFirestoreError(err, OperationType.WRITE, `members/${id}`);
     }
   };
 
@@ -333,7 +366,7 @@ export default function App() {
       });
     } catch (err) {
       console.error("Error saving course:", err);
-      showNotif('فشل في حفظ الدورة', 'error');
+      handleFirestoreError(err, OperationType.WRITE, `courses/${id}`);
     }
   };
 
@@ -377,7 +410,7 @@ export default function App() {
       });
     } catch (err) {
       console.error("Error registering trainee:", err);
-      showNotif('فشل في تسجيل المتدرب', 'error');
+      handleFirestoreError(err, OperationType.WRITE, `trainees/${id}`);
     }
   };
 
@@ -399,7 +432,7 @@ export default function App() {
       showNotif('تم تجديد الاشتراك بنجاح');
     } catch (err) {
       console.error("Error renewing member:", err);
-      showNotif('فشل في تجديد الاشتراك', 'error');
+      handleFirestoreError(err, OperationType.UPDATE, `members/${id}`);
     }
   };
 
@@ -409,7 +442,7 @@ export default function App() {
       showNotif('تم حذف المشترك');
     } catch (err) {
       console.error("Error deleting member:", err);
-      showNotif('فشل في حذف المشترك', 'error');
+      handleFirestoreError(err, OperationType.DELETE, `members/${id}`);
     }
   };
 
@@ -418,7 +451,7 @@ export default function App() {
       await deleteDoc(doc(db, 'courses', id));
       showNotif('تم حذف الدورة');
     } catch (err) {
-      showNotif('فشل في حذف الدورة', 'error');
+      handleFirestoreError(err, OperationType.DELETE, `courses/${id}`);
     }
   };
 
@@ -457,7 +490,7 @@ export default function App() {
     }
   };
 
-  const updatePayment = async (memberId: string, method: 'كاش' | 'حوالة') => {
+  const updatePayment = async (memberId: string, method: 'كاش' | 'تحويل') => {
     const m = members.find(m => m.id === memberId);
     if (!m) return;
 
@@ -506,26 +539,15 @@ export default function App() {
       id: 'attendance', 
       label: 'تسجيل الحضور', 
       icon: CheckSquare,
-      children: [
-        { id: 'attendance_nada', label: 'أ. ندى', teacherName: 'أ. ندى' },
-        { id: 'attendance_mashael', label: 'أ. مشاعل', teacherName: 'أ. مشاعل' },
-        { id: 'attendance_layla', label: 'أ. ليلى', teacherName: 'أ. ليلى' },
-        { id: 'attendance_ahmed', label: 'أ. احمد', teacherName: 'أ. احمد' },
-        { id: 'attendance_ali', label: 'أ. علي', teacherName: 'أ. علي' },
-      ]
+      children: (settings.teachers || []).map(t => ({ id: `attendance_${t}`, label: t, teacherName: t }))
     },
     { 
       id: 'members', 
       label: 'المشتركين', 
       icon: Users,
-      children: [
-        { id: 'members_nada', label: 'أ. ندى', teacherName: 'أ. ندى' },
-        { id: 'members_mashael', label: 'أ. مشاعل', teacherName: 'أ. مشاعل' },
-        { id: 'members_layla', label: 'أ. ليلى', teacherName: 'أ. ليلى' },
-        { id: 'members_ahmed', label: 'أ. احمد', teacherName: 'أ. احمد' },
-        { id: 'members_ali', label: 'أ. علي', teacherName: 'أ. علي' },
-      ]
+      children: (settings.teachers || []).map(t => ({ id: `members_${t}`, label: t, teacherName: t }))
     },
+    { id: 'accountant', label: 'المحاسبة المالية', icon: Icons.Calculator },
     { id: 'compensation', label: 'التعويض', icon: RefreshCw },
     { id: 'expiry', label: 'انتهاء المدة', icon: Clock },
     { id: 'about', label: 'عن الجمعية', icon: Heart },
@@ -541,17 +563,11 @@ export default function App() {
     );
     
     if (view.startsWith('members_')) {
-      const teacherNavItem = navItems.find(n => n.id === 'members')?.children?.find((c: any) => c.id === view);
-      if (teacherNavItem) {
-        return matchesSearch && m.teacherName === (teacherNavItem as any).teacherName;
-      }
+      return matchesSearch && m.teacherName === view.replace('members_', '');
     }
 
     if (view.startsWith('attendance_')) {
-      const teacherNavItem = navItems.find(n => n.id === 'attendance')?.children?.find((c: any) => c.id === view);
-      if (teacherNavItem) {
-        return matchesSearch && m.teacherName === (teacherNavItem as any).teacherName;
-      }
+      return matchesSearch && m.teacherName === view.replace('attendance_', '');
     }
     
     return matchesSearch;
@@ -587,7 +603,7 @@ export default function App() {
     }
   };
 
-  if (authLoading) {
+  if (false && authLoading) {
     return (
       <div className="h-screen flex items-center justify-center bg-natural-bg" dir="rtl">
         <div className="text-center">
@@ -704,42 +720,12 @@ export default function App() {
         </nav>
 
         <div className="p-4 border-t border-white/10 space-y-3">
-          {user ? (
-            <>
-              <div className="bg-white/5 rounded-xl p-3 border border-white/5 flex items-center justify-between">
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <div className="w-8 h-8 rounded-full overflow-hidden bg-natural-accent/20 shrink-0">
-                    <img src={user.photoURL || ''} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                  </div>
-                  <div className="flex flex-col overflow-hidden">
-                    <p className="text-[10px] text-white/50 mb-0.5">المستخدم الحالي</p>
-                    <p className="text-xs font-medium truncate">{user.displayName || user.email}</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={logout}
-                  className="w-full bg-red-50 text-red-500 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-500 hover:text-white transition-all shadow-sm border border-red-100"
-                >
-                  <LogOut size={18} />
-                  تسجيل الخروج (خروج)
-                </button>
-              </div>
-              <div className="bg-white/5 rounded-xl p-3 border border-white/5">
-                <p className="text-[10px] text-white/40 mb-1 uppercase tracking-wider">تاريخ اليوم</p>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-bold text-natural-accent">{new Date().toLocaleDateString('ar-SA')} م</span>
-                </div>
-              </div>
-            </>
-          ) : (
-            <button 
-              onClick={signInWithGoogle}
-              className="w-full bg-natural-accent text-white p-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-opacity-90 transition-all shadow-lg"
-            >
-              <LogIn size={18} />
-              تسجيل الدخول
-            </button>
-          )}
+          <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+            <p className="text-[10px] text-white/40 mb-1 uppercase tracking-wider">تاريخ اليوم</p>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-bold text-natural-accent">{new Date().toLocaleDateString('ar-SA')} م</span>
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -795,16 +781,6 @@ export default function App() {
                 onChange={e => setSearchQuery(e.target.value)}
               />
             </div>
-            {user && (
-              <button 
-                onClick={logout}
-                className="bg-red-50 text-red-500 p-2 rounded-lg hover:bg-red-500 hover:text-white transition-all flex items-center gap-2 border border-red-100"
-                title="خروج من التطبيق"
-              >
-                <LogOut size={18} />
-                <span className="hidden md:inline text-xs font-bold">تسجيل الخروج</span>
-              </button>
-            )}
           </div>
         </header>
 
@@ -864,6 +840,7 @@ export default function App() {
                         </div>
                         <input 
                           type="date" 
+                          required
                           className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none text-sm text-natural-primary text-center"
                           value={newMember.startDate}
                           onChange={e => {
@@ -927,7 +904,7 @@ export default function App() {
                           placeholder="اختر أو اكتب اسم المعلم"
                         />
                         <datalist id="teachersList">
-                          {TEACHERS.map(teacher => (
+                          {(settings.teachers || []).map(teacher => (
                             <option key={teacher} value={teacher} />
                           ))}
                         </datalist>
@@ -943,15 +920,13 @@ export default function App() {
                         />
                         <datalist id="gradesList">
                           <option value="التأسيس" />
-                          <option value="أول ابتدائي" />
-                          <option value="ثاني ابتدائي" />
-                          <option value="ثالث ابتدائي" />
-                          <option value="رابع ابتدائي" />
-                          <option value="خامس ابتدائي" />
-                          <option value="سادس ابتدائي" />
-                          <option value="أول متوسط" />
-                          <option value="ثاني متوسط" />
-                          <option value="ثالث متوسط" />
+                          <option value="الابتدائي" />
+                          <option value="ثاني" />
+                          <option value="ثالث" />
+                          <option value="رابع" />
+                          <option value="خامس" />
+                          <option value="سادس" />
+                          <option value="اول متوسط" />
                         </datalist>
                       </div>
                       <div>
@@ -1034,9 +1009,8 @@ export default function App() {
                         </div>
                         <div>
                           <label className="block text-[10px] font-medium text-natural-secondary mb-1">طريقة الدفع</label>
-                          <input 
-                            list="paymentMethodsList"
-                            className="w-full p-2.5 bg-natural-bg border-none rounded-lg focus:ring-2 focus:ring-natural-accent outline-none text-sm"
+                          <select 
+                            className="w-full p-2.5 bg-natural-bg border-none rounded-lg focus:ring-2 focus:ring-natural-accent outline-none text-sm appearance-none"
                             value={newMember.paymentMethod}
                             onChange={e => {
                               const method = e.target.value as any;
@@ -1047,12 +1021,11 @@ export default function App() {
                               }
                               setNewMember({...newMember, ...updates});
                             }}
-                          />
-                          <datalist id="paymentMethodsList">
-                            <option value="كاش" />
-                            <option value="حوالة" />
-                            <option value="لم يتم الدفع" />
-                          </datalist>
+                          >
+                            <option value="كاش">كاش</option>
+                            <option value="تحويل">تحويل</option>
+                            <option value="لم يتم الدفع">لم يتم الدفع</option>
+                          </select>
                         </div>
                       </div>
                       <div>
@@ -1101,6 +1074,17 @@ export default function App() {
                   </form>
                 </motion.div>
               </div>
+            )}
+
+            {view === 'accountant' && (
+              <AccountantView 
+                members={members} 
+                trainees={trainees} 
+                settings={settings} 
+                setSettings={setSettings}
+                showTotalAmount={showTotalAmount} 
+                setIsPasswordModalOpen={setIsPasswordModalOpen}
+              />
             )}
 
             {view === 'dashboard' && (
@@ -1240,10 +1224,10 @@ export default function App() {
                                   كاش
                                 </button>
                                 <button 
-                                  onClick={() => updatePayment(m.id, 'حوالة')}
+                                  onClick={() => updatePayment(m.id, 'تحويل')}
                                   className="text-[10px] bg-blue-500 text-white px-2 py-1 rounded-lg hover:bg-blue-600 transition-colors font-bold shadow-sm"
                                 >
-                                  حوالة
+                                  تحويل
                                 </button>
                               </div>
                             </div>
@@ -1530,7 +1514,7 @@ export default function App() {
                                   <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
                                     trainee.paymentMethod === 'كاش' 
                                       ? 'bg-orange-50 text-orange-600 border-orange-100' 
-                                      : trainee.paymentMethod === 'حوالة'
+                                      : trainee.paymentMethod === 'تحويل'
                                       ? 'bg-blue-50 text-blue-600 border-blue-100'
                                       : 'bg-red-50 text-red-500 border-red-100'
                                   }`}>
@@ -1638,13 +1622,16 @@ export default function App() {
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-natural-sidebar block px-1">طريقة الدفع</label>
-                      <input 
+                      <select 
                         required
-                        list="paymentMethodsList"
                         value={newTrainee.paymentMethod}
                         onChange={(e) => setNewTrainee({...newTrainee, paymentMethod: e.target.value as any})}
-                        className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all"
-                      />
+                        className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all appearance-none"
+                      >
+                        <option value="كاش">كاش</option>
+                        <option value="تحويل">تحويل</option>
+                        <option value="لم يتم الدفع">لم يتم الدفع</option>
+                      </select>
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-natural-sidebar block px-1">تاريخ التسجيل</label>
@@ -1749,7 +1736,7 @@ export default function App() {
                                 <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
                                   trainee.paymentMethod === 'كاش' 
                                     ? 'bg-orange-50 text-orange-600 border-orange-100' 
-                                    : trainee.paymentMethod === 'حوالة'
+                                    : trainee.paymentMethod === 'تحويل'
                                     ? 'bg-blue-50 text-blue-600 border-blue-100'
                                     : 'bg-red-50 text-red-500 border-red-100'
                                 }`}>
@@ -1947,14 +1934,50 @@ export default function App() {
             )}
 
             {view.startsWith('members') && (
-              <motion.div
-                key={view}
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-                className="bg-white rounded-2xl shadow-sm border border-natural-border overflow-hidden"
-              >
-                <table className="w-full text-right">
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <StatCard 
+                    label="عدد المشتركين" 
+                    value={filteredMembers.length} 
+                    icon={Users} 
+                    color="accent" 
+                  />
+                  <StatCard 
+                    label="إجمالي المبالغ" 
+                    value={showTotalAmount 
+                      ? `${filteredMembers.reduce((acc, curr) => acc + (Number(curr.price) || 0), 0).toLocaleString()} ر.س`
+                      : '••••••'
+                    } 
+                    icon={showTotalAmount ? Tag : Lock} 
+                    color="success" 
+                    onClick={() => {
+                      if (showTotalAmount) setShowTotalAmount(false);
+                      else setIsPasswordModalOpen(true);
+                    }}
+                  />
+                  <StatCard 
+                    label="إجمالي المحصل" 
+                    value={showTotalAmount 
+                      ? `${filteredMembers.reduce((acc, curr) => acc + (Number(curr.paidAmount) || 0), 0).toLocaleString()} ر.س`
+                      : '••••••'
+                    } 
+                    icon={showTotalAmount ? Check : Lock} 
+                    color="sidebar" 
+                    onClick={() => {
+                      if (showTotalAmount) setShowTotalAmount(false);
+                      else setIsPasswordModalOpen(true);
+                    }}
+                  />
+                </div>
+
+                <motion.div
+                  key={view}
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  className="bg-white rounded-2xl shadow-sm border border-natural-border overflow-hidden"
+                >
+                  <table className="w-full text-right">
                   <thead className="bg-natural-bg/50 border-b border-natural-border">
                     <tr>
                       <th className="p-4 text-xs font-semibold text-natural-secondary uppercase tracking-wider">المشترك</th>
@@ -2004,7 +2027,7 @@ export default function App() {
                               <span className={`text-[9px] px-1.5 py-0.5 rounded ${
                                 member.paymentMethod === 'كاش' 
                                   ? 'bg-orange-50 text-orange-600 border border-orange-100' 
-                                  : member.paymentMethod === 'حوالة'
+                                  : member.paymentMethod === 'تحويل'
                                   ? 'bg-blue-50 text-blue-600 border border-blue-100'
                                   : 'bg-red-50 text-red-600 border-red-100'
                               }`}>
@@ -2070,7 +2093,8 @@ export default function App() {
                   </tbody>
                 </table>
               </motion.div>
-            )}
+            </div>
+          )}
 
             {view === 'about' && (
               <motion.div
@@ -2212,7 +2236,86 @@ export default function App() {
                   </div>
                 </SectionCard>
                 <SectionCard title="إجراءات النظام" icon={Zap}>
-                  <div className="space-y-4">
+                  <div className="space-y-6">
+                    <div className="p-6 bg-natural-bg/30 rounded-2xl border border-natural-border">
+                      <p className="text-sm font-bold text-natural-sidebar mb-4 flex items-center gap-2">
+                        <Users size={16} className="text-natural-accent" />
+                        إدارة أسماء المعلمين
+                      </p>
+                      <div className="space-y-4">
+                        <div className="flex gap-4">
+                          <input 
+                            type="text" 
+                            id="newTeacherName"
+                            placeholder="اسم المعلم الجديد"
+                            className="flex-1 px-4 py-3 bg-white border border-natural-border rounded-xl outline-none focus:border-natural-accent transition-all"
+                          />
+                          <button 
+                            onClick={() => {
+                              const input = document.getElementById('newTeacherName') as HTMLInputElement;
+                              const name = input.value.trim();
+                              if (name && !settings.teachers?.includes(name)) {
+                                const newTeachers = [...(settings.teachers || []), name];
+                                setSettings({...settings, teachers: newTeachers});
+                                updateSettings({...settings, teachers: newTeachers});
+                                input.value = '';
+                                showNotif('تم إضافة المعلم بنجاح', 'success');
+                              }
+                            }}
+                            className="bg-natural-sidebar text-white px-8 py-3 rounded-xl font-bold hover:bg-natural-accent transition-all"
+                          >
+                            إضافة
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {(settings.teachers || []).map((teacher, idx) => (
+                            <div key={idx} className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-natural-border shadow-sm">
+                              <span className="text-sm font-bold text-natural-sidebar">{teacher}</span>
+                              <button 
+                                onClick={() => {
+                                  const newTeachers = settings.teachers?.filter(t => t !== teacher);
+                                  setSettings({...settings, teachers: newTeachers});
+                                  updateSettings({...settings, teachers: newTeachers});
+                                  showNotif('تم حذف المعلم', 'success');
+                                }}
+                                className="text-red-500 hover:bg-red-50 p-1 rounded-lg transition-colors"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-6 bg-natural-bg/30 rounded-2xl border border-natural-border">
+                      <p className="text-sm font-bold text-natural-sidebar mb-4 flex items-center gap-2">
+                        <Lock size={16} className="text-natural-accent" />
+                        تغيير كلمة مرور الإحصائيات المالية
+                      </p>
+                      <div className="flex gap-4">
+                        <input 
+                          type="text" 
+                          placeholder="كلمة المرور الجديدة"
+                          className="flex-1 px-4 py-3 bg-white border border-natural-border rounded-xl outline-none focus:border-natural-accent transition-all text-center font-bold tracking-widest"
+                          value={settings.financialPassword || ''}
+                          onChange={(e) => setSettings({
+                            ...settings,
+                            financialPassword: e.target.value
+                          })}
+                        />
+                        <button 
+                          onClick={() => {
+                            updateSettings(settings);
+                            showNotif('تم حفظ كلمة المرور الجديدة', 'success');
+                          }}
+                          className="bg-natural-sidebar text-white px-8 py-3 rounded-xl font-bold hover:bg-natural-accent transition-all shadow-lg shadow-natural-sidebar/10"
+                        >
+                          حفظ
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="flex items-center justify-between p-4 bg-red-50 rounded-2xl border border-red-100">
                       <div>
                         <p className="font-bold text-red-900">تصفير الإحصائيات</p>
@@ -2471,7 +2574,73 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Quick Stats Edit Modal */}
+          {/* Password Protection Modal */}
+          <AnimatePresence>
+            {isPasswordModalOpen && (
+              <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-natural-sidebar/60 backdrop-blur-md">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl border border-natural-border overflow-hidden"
+                >
+                  <div className="bg-natural-sidebar p-8 text-center text-white">
+                    <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <Lock size={32} className="text-natural-accent" />
+                    </div>
+                    <h3 className="text-xl font-bold mb-1">منطقة محمية</h3>
+                    <p className="text-white/60 text-xs">يرجى إدخال كلمة المرور لرؤية المبالغ</p>
+                  </div>
+
+                  <div className="p-8 space-y-6">
+                    <div className="space-y-4">
+                      <div className="relative">
+                        <input 
+                          type="password" 
+                          placeholder="كلمة المرور"
+                          className={`w-full px-5 py-4 bg-natural-bg border ${passwordError ? 'border-red-500 shadow-[0_0_0_1px_rgba(239,68,68,0.5)]' : 'border-natural-border focus:border-natural-accent'} rounded-2xl outline-none text-center font-bold tracking-[0.5em] transition-all`}
+                          value={passwordInput}
+                          onChange={e => {
+                            setPasswordInput(e.target.value);
+                            setPasswordError(false);
+                          }}
+                          onKeyDown={e => e.key === 'Enter' && verifyPassword()}
+                          autoFocus
+                        />
+                        {passwordError && (
+                          <motion.p 
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="text-red-500 text-[10px] text-center mt-2 font-bold"
+                          >
+                            كلمة المرور غير صحيحة، حاول مرة أخرى
+                          </motion.p>
+                        )}
+                      </div>
+
+                      <button 
+                        onClick={verifyPassword}
+                        className="w-full bg-natural-sidebar text-white py-4 rounded-2xl font-bold hover:bg-natural-accent transition-all shadow-xl shadow-natural-sidebar/20"
+                      >
+                        دخول
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setIsPasswordModalOpen(false);
+                          setPasswordInput('');
+                          setPasswordError(false);
+                        }}
+                        className="w-full text-natural-secondary py-2 text-sm font-bold hover:text-natural-sidebar transition-colors"
+                      >
+                        إلغاء
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+                              {/* Quick Stats Edit Modal */}
           <AnimatePresence>
             {editingMemberStats && (
               <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-natural-sidebar/40 backdrop-blur-sm">
@@ -2501,9 +2670,6 @@ export default function App() {
                             value={editingMemberStats.attendedCount}
                             onChange={e => setEditingMemberStats({...editingMemberStats, attendedCount: parseInt(e.target.value) || 0})}
                           />
-                          <div className="absolute top-1/2 left-4 -translate-y-1/2 text-natural-secondary">
-                             <DynamicIcon name={settings.icons.activeMember} size={16} />
-                          </div>
                         </div>
                       </div>
 
@@ -2516,9 +2682,6 @@ export default function App() {
                             value={editingMemberStats.absentCount}
                             onChange={e => setEditingMemberStats({...editingMemberStats, absentCount: parseInt(e.target.value) || 0})}
                           />
-                          <div className="absolute top-1/2 left-4 -translate-y-1/2 text-natural-accent">
-                             <DynamicIcon name={settings.icons.absent} size={16} />
-                          </div>
                         </div>
                       </div>
 
@@ -2531,9 +2694,6 @@ export default function App() {
                             value={editingMemberStats.compensationSessions}
                             onChange={e => setEditingMemberStats({...editingMemberStats, compensationSessions: parseInt(e.target.value) || 0})}
                           />
-                          <div className="absolute top-1/2 left-4 -translate-y-1/2 text-natural-sidebar">
-                             <DynamicIcon name={settings.icons.compensation} size={16} />
-                          </div>
                         </div>
                       </div>
                     </div>
@@ -2541,16 +2701,9 @@ export default function App() {
                     <div className="flex flex-col gap-3">
                       <button 
                         type="submit"
-                        className="w-full bg-natural-accent text-white py-4 rounded-2xl font-bold hover:bg-opacity-90 transition-all shadow-lg shadow-natural-accent/20"
+                        className="w-full bg-natural-accent text-white py-4 rounded-2xl font-bold hover:bg-opacity-90 transition-all shadow-lg"
                       >
                         حفظ التعديلات
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => setEditingMemberStats(null)}
-                        className="w-full bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all"
-                      >
-                        إلغاء
                       </button>
                     </div>
                   </form>
@@ -2564,7 +2717,356 @@ export default function App() {
   );
 }
 
-function StatCard({ label, value, icon: Icon, color }: any) {
+function AccountantView({ members, trainees, settings, setSettings, showTotalAmount, setIsPasswordModalOpen }: any) {
+  const [financials, setFinancials] = useState<Record<string, { base?: number, percentage: number, extra: number }>>({});
+  const [calcDisplay, setCalcDisplay] = useState('0');
+  const [calcExpression, setCalcExpression] = useState('');
+  const [newTeacherName, setNewTeacherName] = useState('');
+  
+  // Quick Calculation States
+  const [calcBase, setCalcBase] = useState<number>(0);
+  const [calcPct, setCalcPct] = useState<number>(0);
+  const [calcFixed, setCalcFixed] = useState<number>(0);
+
+  const teachers = settings.teachers || [];
+  
+  const calculateTeacherProfit = (teacher: string) => {
+    const teacherMembers = members.filter((m: any) => m.teacherName === teacher);
+    const total = teacherMembers.reduce((acc: number, curr: any) => acc + (Number(curr.price) || 0), 0);
+    const config = financials[teacher] || { base: total, percentage: 0, extra: 0 };
+    const baseToUse = config.base !== undefined ? config.base : total;
+    return (baseToUse * (config.percentage / 100)) + Number(config.extra);
+  };
+
+  const totalTeacherProfits = teachers.reduce((acc: number, t: string) => acc + calculateTeacherProfit(t), 0);
+  const totalExpected = members.reduce((acc: number, curr: any) => acc + (Number(curr.price) || 0), 0);
+  const totalAssocProfit = totalExpected - totalTeacherProfits;
+
+  const quickCalcResult = (Number(calcBase) * (Number(calcPct) / 100)) + Number(calcFixed);
+
+  const handleCalcClick = (val: string) => {
+    if (val === 'C') {
+      setCalcDisplay('0');
+      setCalcExpression('');
+    } else if (val === '=') {
+      try {
+        const result = eval(calcExpression.replace(/×/g, '*').replace(/÷/g, '/'));
+        setCalcDisplay(String(result));
+        setCalcExpression(String(result));
+      } catch {
+        setCalcDisplay('Error');
+      }
+    } else {
+      const lastChar = calcExpression.slice(-1);
+      const isOperator = ['+', '-', '*', '/', '×', '÷'].includes(val);
+      const lastIsOperator = ['+', '-', '*', '/', '×', '÷'].includes(lastChar);
+      
+      if (isOperator && lastIsOperator) {
+        setCalcExpression(calcExpression.slice(0, -1) + val);
+      } else {
+        setCalcExpression(calcExpression === '0' ? val : calcExpression + val);
+        setCalcDisplay(calcDisplay === '0' || ['+', '-', '×', '÷'].includes(lastChar) ? val : calcDisplay + val);
+      }
+    }
+  };
+
+  const handleAddTeacher = () => {
+    if (!newTeacherName.trim()) return;
+    if (teachers.includes(newTeacherName.trim())) {
+      setNewTeacherName('');
+      return;
+    }
+    const updatedTeachers = [...teachers, newTeacherName.trim()];
+    setSettings({ ...settings, teachers: updatedTeachers });
+    setNewTeacherName('');
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-natural-sidebar">المحاسبة المالية</h2>
+          <p className="text-natural-secondary text-sm">تقارير المبالغ المالية لكل معلم/ة</p>
+        </div>
+        <button 
+          onClick={() => {
+            if (showTotalAmount) setIsPasswordModalOpen(false); 
+            setIsPasswordModalOpen(true);
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl border font-bold transition-all ${
+            showTotalAmount 
+              ? 'bg-natural-accent/10 text-natural-accent border-natural-accent/20' 
+              : 'bg-natural-sidebar text-white border-transparent'
+          }`}
+        >
+          {showTotalAmount ? <EyeOff size={18} /> : <Lock size={18} />}
+          {showTotalAmount ? 'إخفاء المبالغ' : 'كشف المبالغ'}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard 
+            label="إجمالي المبالغ المتوقعة" 
+            value={showTotalAmount ? `${totalExpected.toLocaleString()} ر.س` : '••••••'} 
+            icon={Tag} 
+            color="accent" 
+          />
+          <StatCard 
+            label="المبلغ المتبقي للجمعية" 
+            value={showTotalAmount ? `${totalAssocProfit.toLocaleString()} ر.س` : '••••••'} 
+            icon={Heart} 
+            color="success" 
+          />
+          <StatCard 
+            label="إجمالي مستحقات المعلمين" 
+            value={showTotalAmount ? `${totalTeacherProfits.toLocaleString()} ر.س` : '••••••'} 
+            icon={Users} 
+            color="sidebar" 
+          />
+          <StatCard 
+            label="إجمالي الدورات" 
+            value={showTotalAmount ? `${trainees.reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0).toLocaleString()} ر.س` : '••••••'} 
+            icon={BookOpen} 
+            color="accent" 
+          />
+        </div>
+
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-3xl border border-natural-border shadow-sm">
+            <h3 className="font-bold text-natural-sidebar mb-4 flex items-center gap-2">
+              <Icons.Zap size={20} className="text-natural-accent" />
+              حساب سريع
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-natural-secondary block mb-1">المبلغ الأساسي</label>
+                <input 
+                  type="number"
+                  value={calcBase || ''}
+                  onChange={e => setCalcBase(Number(e.target.value))}
+                  className="w-full px-4 py-2 bg-natural-bg border border-natural-border rounded-xl outline-none focus:border-natural-accent font-bold"
+                  placeholder="0"
+                />
+              </div>
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="text-[10px] font-bold text-natural-secondary block mb-1">النسبة (%)</label>
+                  <input 
+                    type="number"
+                    value={calcPct || ''}
+                    onChange={e => setCalcPct(Number(e.target.value))}
+                    className="w-full px-4 py-2 bg-natural-bg border border-natural-border rounded-xl outline-none focus:border-natural-accent font-bold text-center"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] font-bold text-natural-secondary block mb-1">مبلغ مضاف</label>
+                  <input 
+                    type="number"
+                    value={calcFixed || ''}
+                    onChange={e => setCalcFixed(Number(e.target.value))}
+                    className="w-full px-4 py-2 bg-natural-bg border border-natural-border rounded-xl outline-none focus:border-natural-accent font-bold text-center"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+              <div className="pt-4 border-t border-natural-bg mt-4">
+                <div className="flex justify-between items-center bg-natural-sidebar p-4 rounded-2xl text-white">
+                  <span className="text-xs font-bold opacity-70">الناتج:</span>
+                  <span className="text-lg font-bold">{quickCalcResult.toLocaleString()} ر.س</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl border border-natural-border shadow-sm">
+            <h3 className="font-bold text-natural-sidebar mb-4 flex items-center gap-2">
+              <Icons.Calculator size={20} className="text-natural-accent" />
+              آلة حاسبة
+            </h3>
+            
+            <div className="bg-natural-bg p-4 rounded-2xl mb-4 text-left">
+              <div className="text-[10px] text-natural-secondary h-4 overflow-hidden text-right">{calcExpression || ' '}</div>
+              <div className="text-xl font-bold text-natural-sidebar truncate text-right">{calcDisplay}</div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-2">
+              {['7', '8', '9', '÷', '4', '5', '6', '×', '1', '2', '3', '-', '0', '.', 'C', '+'].map(btn => (
+                <button 
+                  key={btn} 
+                  onClick={() => handleCalcClick(btn)}
+                  className={`py-2 rounded-xl font-bold transition-all ${
+                    ['÷', '×', '-', '+'].includes(btn) 
+                      ? 'bg-natural-accent/10 text-natural-accent hover:bg-natural-accent hover:text-white' 
+                      : btn === 'C' 
+                      ? 'bg-red-50 text-red-500 hover:bg-red-500 hover:text-white' 
+                      : 'bg-natural-bg text-natural-sidebar hover:bg-natural-sidebar hover:text-white'
+                  }`}
+                >
+                  {btn}
+                </button>
+              ))}
+              <button 
+                onClick={() => handleCalcClick('=')}
+                className="col-span-4 bg-natural-sidebar text-white py-2 rounded-xl font-bold hover:bg-natural-accent transition-colors mt-1"
+              >
+                =
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+      <div className="bg-white rounded-3xl border border-natural-border overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-natural-border bg-natural-bg/30">
+          <h3 className="font-bold text-lg text-natural-sidebar">تحليل المبالغ حسب المعلمين</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-right">
+            <thead className="bg-natural-bg/50 border-b border-natural-border">
+              <tr>
+                <th className="p-4 text-xs font-bold text-natural-sidebar">المعلم/ة</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar text-center">طلاب</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar text-center">إجمالي النظام</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar">المبلغ الأساسي</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar">النسبة (%)</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar">المستحق للمعلم</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar">للجمعية</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-natural-bg">
+              {teachers.map((teacher: string) => {
+                const teacherMembers = members.filter((m: any) => m.teacherName === teacher);
+                const total = teacherMembers.reduce((acc: number, curr: any) => acc + (Number(curr.price) || 0), 0);
+                const config = financials[teacher] || { base: undefined, percentage: 0, extra: 0 };
+                
+                const baseToUse = config.base !== undefined ? config.base : total;
+                const teacherProfit = (baseToUse * (config.percentage / 100)) + Number(config.extra);
+                const assocProfit = total - teacherProfit;
+
+                return (
+                  <tr key={teacher} className="hover:bg-natural-bg/20 transition-colors">
+                    <td className="p-4">
+                      <div className="flex items-center justify-between group">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-natural-accent/10 rounded-lg flex items-center justify-center text-natural-accent">
+                            <Icons.User size={16} />
+                          </div>
+                          <span className="font-bold text-natural-sidebar text-sm">{teacher}</span>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            const updatedTeachers = (settings.teachers || []).filter((t: string) => t !== teacher);
+                            setSettings({ ...settings, teachers: updatedTeachers });
+                          }}
+                          className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                          title="حذف"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                    <td className="p-4 text-center">
+                      <span className="text-xs font-bold text-natural-secondary">
+                        {teacherMembers.length}
+                      </span>
+                    </td>
+                    <td className="p-4 font-bold text-xs text-center text-natural-secondary">
+                      {showTotalAmount ? `${total.toLocaleString()} ر.س` : '••••••'}
+                    </td>
+                    <td className="p-4">
+                      <input 
+                        type="number"
+                        placeholder={total.toString()}
+                        value={config.base ?? ''}
+                        onChange={e => setFinancials({
+                          ...financials,
+                          [teacher]: { ...config, base: e.target.value === '' ? undefined : Number(e.target.value) }
+                        })}
+                        className="w-24 p-2 bg-natural-bg rounded-lg border-none focus:ring-1 focus:ring-natural-accent outline-none text-xs text-center font-bold"
+                      />
+                    </td>
+                    <td className="p-4">
+                      <input 
+                        type="number"
+                        placeholder="%"
+                        value={config.percentage || ''}
+                        onChange={e => setFinancials({
+                          ...financials,
+                          [teacher]: { ...config, percentage: Number(e.target.value) }
+                        })}
+                        className="w-16 p-2 bg-natural-bg rounded-lg border-none focus:ring-1 focus:ring-natural-accent outline-none text-xs text-center font-bold"
+                      />
+                    </td>
+                    <td className="p-4 font-bold text-natural-accent">
+                      {showTotalAmount ? `${teacherProfit.toLocaleString()} ر.س` : '••••••'}
+                    </td>
+                    <td className="p-4 font-bold text-natural-secondary text-sm">
+                      {showTotalAmount ? `${assocProfit.toLocaleString()} ر.س` : '••••••'}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-natural-bg/10">
+                <td className="p-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 bg-natural-accent/20 rounded-lg flex items-center justify-center text-natural-accent">
+                      <Plus size={16} />
+                    </div>
+                    <input 
+                      type="text"
+                      placeholder="اسم المعلم/ة الجديد..."
+                      value={newTeacherName}
+                      onChange={e => setNewTeacherName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAddTeacher()}
+                      className="flex-1 bg-white p-2 rounded-lg border border-natural-border focus:border-natural-accent outline-none text-xs font-bold"
+                    />
+                  </div>
+                </td>
+                <td colSpan={6} className="p-4">
+                  <button 
+                    onClick={handleAddTeacher}
+                    disabled={!newTeacherName.trim()}
+                    className="px-4 py-2 bg-natural-accent text-white rounded-xl text-xs font-bold hover:bg-opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    إضافة المعلم/ة للجدول
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+            <tfoot className="bg-natural-sidebar text-white shadow-[0_-4px_10px_rgba(0,0,0,0.1)]">
+              <tr>
+                <td colSpan={2} className="p-6 font-bold text-lg text-white">الإجمالي العام</td>
+                <td className="p-6 font-bold text-lg text-center border-r border-white/10 text-white">
+                  {showTotalAmount ? `${totalExpected.toLocaleString()} ر.س` : '••••••'}
+                </td>
+                <td className="p-6 border-r border-white/10" colSpan={2}></td>
+                <td className="p-6 font-bold text-lg bg-natural-accent/20 border-r border-white/10 text-white">
+                  {showTotalAmount ? `${totalTeacherProfits.toLocaleString()} ر.س` : '••••••'}
+                </td>
+                <td className="p-6 font-bold text-lg text-white">
+                  {showTotalAmount ? `${totalAssocProfit.toLocaleString()} ر.س` : '••••••'}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function TeacherRow({ teacher, total, paid, studentCount, showTotalAmount }: any) {
+  return null; // This component is now integrated into AccountantView for better state management
+}
+
+function StatCard({ label, value, icon: Icon, color, onClick }: any) {
   const colors: any = {
     accent: 'bg-natural-accent/10 text-natural-accent',
     success: 'bg-natural-success/10 text-natural-success',
@@ -2572,7 +3074,10 @@ function StatCard({ label, value, icon: Icon, color }: any) {
   };
 
   return (
-    <div className="bg-white p-6 rounded-2xl shadow-sm border border-natural-border hover:shadow-md transition-shadow">
+    <div 
+      onClick={onClick}
+      className={`bg-white p-6 rounded-2xl shadow-sm border border-natural-border hover:shadow-md transition-all ${onClick ? 'cursor-pointer active:scale-95' : ''}`}
+    >
       <div className="flex justify-between items-start mb-4">
         <div className={`p-3 rounded-xl ${colors[color] || colors.accent}`}>
           <Icon size={24} />

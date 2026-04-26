@@ -22,52 +22,52 @@ service cloud.firestore {
 
     // Members collection
     match /members/{memberId} {
-      allow read, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(memberId) &&
+      allow read, list: if true;
+      allow create: if isValidId(memberId) &&
         incomingData().keys().hasAll(['id', 'name', 'startDate', 'endDate', 'status']) &&
         incomingData().name is string && incomingData().name.size() > 0 &&
         incomingData().name.size() <= 100;
-      allow update: if isSignedIn() &&
+      allow update: if true &&
         incomingData().diff(resource.data).affectedKeys().hasAny(['name', 'phone', 'startDate', 'endDate', 'status', 'sessionsCount', 'attendedCount', 'absentCount', 'compensationSessions', 'grade', 'subjects', 'price', 'paidAmount', 'paymentMethod', 'paymentDate', 'subscriptionDays', 'teacherName']);
-      allow delete: if isSignedIn();
+      allow delete: if true;
     }
 
     // Courses collection
     match /courses/{courseId} {
-      allow read, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(courseId) &&
+      allow read, list: if true;
+      allow create: if isValidId(courseId) &&
         incomingData().keys().hasAll(['id', 'title', 'instructor', 'status']) &&
         incomingData().title is string && incomingData().title.size() <= 200;
-      allow update: if isSignedIn() &&
+      allow update: if true &&
         incomingData().diff(resource.data).affectedKeys().hasAny(['title', 'instructor', 'startDate', 'endDate', 'capacity', 'enrolledCount', 'status', 'price', 'description']);
-      allow delete: if isSignedIn();
+      allow delete: if true;
     }
 
     // Trainees collection
     match /trainees/{traineeId} {
-      allow read, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(traineeId) &&
+      allow read, list: if true;
+      allow create: if isValidId(traineeId) &&
         incomingData().keys().hasAll(['id', 'courseId', 'fullName', 'date']) &&
         incomingData().fullName is string && incomingData().fullName.size() <= 100;
-      allow update: if isSignedIn() &&
+      allow update: if true &&
         incomingData().diff(resource.data).affectedKeys().hasAny(['fullName', 'motherPhone', 'duration', 'amount', 'paymentMethod', 'date', 'notes']);
-      allow delete: if isSignedIn();
+      allow delete: if true;
     }
 
     // Attendance collection
     match /attendance/{attendanceId} {
-      allow read, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(attendanceId) &&
+      allow read, list: if true;
+      allow create: if isValidId(attendanceId) &&
         incomingData().keys().hasAll(['id', 'memberId', 'date', 'status']);
-      allow update: if isSignedIn() &&
+      allow update: if true &&
         incomingData().diff(resource.data).affectedKeys().hasAny(['status']);
-      allow delete: if isSignedIn();
+      allow delete: if true;
     }
 
     // Settings collection
     match /settings/{settingId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
   }
 }

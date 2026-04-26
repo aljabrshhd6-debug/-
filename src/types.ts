@@ -10,6 +10,8 @@ export interface IconMapping {
 
 export interface AppSettings {
   icons: IconMapping;
+  financialPassword?: string;
+  teachers?: string[];
 }
 
 export interface Member {
@@ -27,7 +29,7 @@ export interface Member {
   subjects?: string;
   price?: string;
   paidAmount?: string;
-  paymentMethod?: 'كاش' | 'حوالة' | 'لم يتم الدفع';
+  paymentMethod?: 'كاش' | 'تحويل' | 'لم يتم الدفع';
   paymentDate?: string;
   subscriptionDays?: number;
   teacherName?: string;
@@ -53,7 +55,7 @@ export interface Trainee {
   motherPhone: string;
   duration: string;
   amount: string;
-  paymentMethod: 'كاش' | 'حوالة' | 'لم يتم الدفع';
+  paymentMethod: 'كاش' | 'تحويل' | 'لم يتم الدفع';
   date: string;
   notes?: string;
 }

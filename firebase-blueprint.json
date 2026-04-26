@@ -19,7 +19,7 @@
         "subjects": { "type": "string" },
         "price": { "type": "string" },
         "paidAmount": { "type": "string" },
-        "paymentMethod": { "type": "string", "enum": ["كاش", "حوالة", "لم يتم الدفع"] },
+        "paymentMethod": { "type": "string", "enum": ["كاش", "تحويل", "لم يتم الدفع"] },
         "paymentDate": { "type": "string" },
         "subscriptionDays": { "type": "number" },
         "teacherName": { "type": "string" }
@@ -55,7 +55,7 @@
         "motherPhone": { "type": "string" },
         "duration": { "type": "string" },
         "amount": { "type": "string" },
-        "paymentMethod": { "type": "string", "enum": ["كاش", "حوالة", "لم يتم الدفع"] },
+        "paymentMethod": { "type": "string", "enum": ["كاش", "تحويل", "لم يتم الدفع"] },
         "date": { "type": "string" },
         "notes": { "type": "string" }
       },
@@ -87,7 +87,8 @@
             "absent": { "type": "string" },
             "compensation": { "type": "string" }
           }
-        }
+        },
+        "financialPassword": { "type": "string" }
       }
     }
   },
