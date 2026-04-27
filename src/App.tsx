@@ -659,7 +659,7 @@ export default function App() {
           <div className="flex items-center gap-3 text-white">
             <div className="bg-white p-1 rounded-lg overflow-hidden flex items-center justify-center w-10 h-10 shadow-sm transition-transform hover:scale-105">
               <img 
-                src="/logo.jpg" 
+                src="/logo (4).jpg" 
                 alt="شعار الجمعية" 
                 className="w-full h-full object-contain"
                 referrerPolicy="no-referrer"
@@ -1099,7 +1099,7 @@ export default function App() {
                 <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-8">
                   <div className="flex items-center gap-6">
                     <div className="w-24 h-24 bg-natural-sidebar rounded-3xl p-3 shadow-xl overflow-hidden">
-                      <img src="/logo.jpg" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                      <img src="/logo (4).jpg" alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                     </div>
                     <div>
                       <h2 className="text-2xl font-bold text-natural-sidebar leading-tight">الجمعية التعاونية إبداع</h2>
@@ -2109,7 +2109,7 @@ export default function App() {
                     <div className="relative z-10">
                       <div className="bg-white p-4 rounded-[2rem] shadow-2xl inline-block mb-6 relative group overflow-hidden w-32 h-32 flex items-center justify-center">
                         <img 
-                          src="/logo.jpg" 
+                          src="/logo (4).jpg" 
                           alt="شعار الجمعية" 
                           className="w-full h-full object-contain"
                           referrerPolicy="no-referrer"
