@@ -17,7 +17,7 @@ export interface AppSettings {
 export interface Member {
   id: string;
   name: string;
-  phone: string;
+  phone?: string;
   startDate: string;
   endDate: string;
   status: MemberStatus;
@@ -45,14 +45,20 @@ export interface Course {
   enrolledCount: number;
   status: 'active' | 'upcoming' | 'completed';
   price: string;
+  duration?: string;
   description?: string;
+  cost?: string;
+  associationPercentage?: string;
+  isSettled?: boolean;
+  extraIncome?: string;
+  extraExpenses?: string;
 }
 
 export interface Trainee {
   id: string;
   courseId: string;
   fullName: string;
-  motherPhone: string;
+  motherPhone?: string;
   duration: string;
   amount: string;
   paymentMethod: 'كاش' | 'تحويل' | 'لم يتم الدفع';
@@ -65,5 +71,12 @@ export interface AttendanceRecord {
   memberId: string;
   date: string;
   status: 'present' | 'absent' | 'absent_compensated' | 'compensated';
+}
+
+export interface TeacherAttendance {
+  id: string;
+  teacherName: string;
+  date: string;
+  status: 'حاضر' | 'غائب' | 'غائب بي تعويض';
 }
 

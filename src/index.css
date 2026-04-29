@@ -12,6 +12,45 @@
   --font-sans: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
+@media print {
+  .no-print, 
+  nav, 
+  aside,
+  header,
+  button,
+  .print-hide {
+    display: none !important;
+  }
+  
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  body {
+    background-color: white !important;
+  }
+
+  .shadow-2xl, .shadow-xl, .shadow-sm, .shadow-lg {
+    box-shadow: none !important;
+  }
+
+  .border-2 {
+    border-width: 1px !important;
+  }
+
+  .bg-[#FFE57F] {
+    background-color: #FFE57F !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .rounded-[2rem], .rounded-3xl, .rounded-2xl {
+    border-radius: 8px !important;
+  }
+}
+
 @layer base {
   body {
     @apply bg-natural-bg text-natural-primary antialiased;

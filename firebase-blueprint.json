@@ -73,6 +73,18 @@
       },
       "required": ["id", "memberId", "date", "status"]
     },
+    "TeacherAttendance": {
+      "title": "TeacherAttendance",
+      "description": "Represents a teacher's attendance status for a specific date.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["حاضر", "غائب"] }
+      },
+      "required": ["id", "teacherName", "date", "status"]
+    },
     "AppSettings": {
       "title": "AppSettings",
       "description": "Global application settings including icon mappings.",
@@ -108,6 +120,10 @@
     "attendance": {
       "schema": "AttendanceRecord",
       "description": "Collection of attendance logs."
+    },
+    "teacher_attendance": {
+      "schema": "TeacherAttendance",
+      "description": "Collection of teacher attendance logs."
     },
     "settings": {
       "schema": "AppSettings",

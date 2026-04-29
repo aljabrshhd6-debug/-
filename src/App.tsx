@@ -44,7 +44,7 @@ import {
 } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Member, AttendanceRecord, AppSettings, IconMapping, Course, Trainee } from './types';
+import { Member, AttendanceRecord, AppSettings, IconMapping, Course, Trainee, TeacherAttendance } from './types';
 import { SAMPLE_MEMBERS } from './constants';
 import { 
   auth, 
@@ -62,6 +62,20 @@ import {
   OperationType
 } from './lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer, 
+  PieChart, 
+  Pie, 
+  Cell 
+} from 'recharts';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const AVAILABLE_ICONS = [
   { name: 'CheckSquare', icon: CheckSquare },
@@ -96,21 +110,32 @@ const DEFAULT_SETTINGS: AppSettings = {
   teachers: ['أ. ندى', 'أ. مشاعل', 'أ. ليلى', 'أ. احمد', 'أ. علي']
 };
 
-type View = 'dashboard' | 'accountant' | 'courses' | 'courses_list' | 'courses_add' | 'courses_trainees' | 'courses_trainee_add' | 'course_fun' | 'course_rose' | 'course_bread' | 'attendance' | 'members' | 'compensation' | 'expiry' | 'settings' | 'about' | string;
+type View = 'dashboard' | 'accountant' | 'teacher_attendance' | 'courses' | 'courses_list' | 'courses_add' | 'courses_trainees' | 'courses_trainee_add' | 'course_fun' | 'course_rose' | 'course_bread' | 'attendance' | 'members' | 'compensation' | 'expiry' | 'settings' | 'about' | string;
 
 export default function App() {
-  const [view, setView] = useState<View>('dashboard');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const view = (location.pathname.substring(1) as View) || 'dashboard';
+  
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [showTotalAmount, setShowTotalAmount] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [notif, setNotif] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [newTeacherInput, setNewTeacherInput] = useState('');
   const [members, setMembers] = useState<Member[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
+
+  const setView = (v: View) => {
+    navigate(`/${v}`);
+    setIsMobileMenuOpen(false);
+  };
 
   // Auth Listener
   useEffect(() => {
@@ -136,6 +161,25 @@ export default function App() {
       showNotif('تم عرض المبالغ بنجاح', 'success');
     } else {
       setPasswordError(true);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!newPasswordInput.trim()) {
+      showNotif('يرجى إدخال كلمة مرور صالحة', 'error');
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'settings', 'global'), {
+        financialPassword: newPasswordInput.trim()
+      });
+      setSettings({...settings, financialPassword: newPasswordInput.trim()});
+      setIsResettingPassword(false);
+      setNewPasswordInput('');
+      showNotif('تم تغيير كلمة المرور بنجاح', 'success');
+    } catch (error) {
+      console.error(error);
+      showNotif('حدث خطأ أثناء تغيير كلمة المرور', 'error');
     }
   };
 
@@ -177,12 +221,20 @@ export default function App() {
       handleFirestoreError(error, OperationType.GET, 'settings/global');
     });
 
+    const unsubTeacherAttendance = onSnapshot(collection(db, 'teacher_attendance'), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeacherAttendance));
+      setTeacherAttendance(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'teacher_attendance');
+    });
+
     return () => {
       unsubMembers();
       unsubCourses();
       unsubTrainees();
       unsubAttendance();
       unsubSettings();
+      unsubTeacherAttendance();
     };
   }, []);
 
@@ -192,12 +244,20 @@ export default function App() {
     startDate: '',
     endDate: '',
     price: '',
+    duration: '',
     description: '',
     capacity: 20,
-    status: 'upcoming'
+    status: 'upcoming',
+    cost: '',
+    associationPercentage: '30',
+    extraIncome: '',
+    extraExpenses: ''
   });
 
+  const [selectedAccountingCourseId, setSelectedAccountingCourseId] = useState<string | null>(null);
+
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [teacherAttendance, setTeacherAttendance] = useState<TeacherAttendance[]>([]);
   const [trainees, setTrainees] = useState<Trainee[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [detailsCourse, setDetailsCourse] = useState<Course | null>(null);
@@ -227,18 +287,44 @@ export default function App() {
   const [newMember, setNewMember] = useState<Partial<Member>>({
     name: '',
     phone: '',
-    startDate: '',
+    startDate: new Date().toISOString().split('T')[0],
     endDate: '',
     subscriptionDays: 30,
-    sessionsCount: 12,
-    grade: 'التأسيس',
-    subjects: 'حقيبة كاملة',
-    price: '700',
-    paidAmount: '700',
+    sessionsCount: undefined,
+    grade: '',
+    subjects: '',
+    price: '',
+    paidAmount: '',
     paymentMethod: 'كاش',
-    paymentDate: '',
-    teacherName: ''
+    paymentDate: new Date().toISOString().split('T')[0],
+    teacherName: '',
+    notes: ''
   });
+
+  const resetNewMember = () => {
+    setNewMember({ 
+      name: '', 
+      phone: '', 
+      startDate: new Date().toISOString().split('T')[0], 
+      endDate: '', 
+      subscriptionDays: 30,
+      sessionsCount: undefined, // Set to undefined to ensure field is blank
+      grade: '', 
+      subjects: '', 
+      price: '', // Also clear price as part of "blank form" request
+      paidAmount: '', // Also clear paid amount as part of "blank form" request
+      paymentMethod: 'كاش',
+      paymentDate: new Date().toISOString().split('T')[0],
+      teacherName: '',
+      notes: ''
+    });
+  };
+
+  useEffect(() => {
+    if (isAddModalOpen) {
+      resetNewMember();
+    }
+  }, [isAddModalOpen]);
 
   // Helper for Remaining Days
   const getRemainingDays = (endDate: string) => {
@@ -277,7 +363,7 @@ export default function App() {
     };
   }, [members]);
 
-  const handleAddMember = async (e: React.FormEvent) => {
+  const handleAddMember = async (e: React.FormEvent, keepOpen = false) => {
     e.preventDefault();
     
     if (!newMember.name || !newMember.startDate || !newMember.endDate) {
@@ -293,48 +379,57 @@ export default function App() {
       startDate: newMember.startDate!,
       endDate: newMember.endDate!,
       status: 'active',
-      sessionsCount: newMember.sessionsCount!,
+      sessionsCount: newMember.sessionsCount || 0,
       attendedCount: 0,
       absentCount: 0,
       compensationSessions: 0,
       subscriptionDays: newMember.subscriptionDays,
-      grade: newMember.grade,
-      subjects: newMember.subjects,
-      price: newMember.price,
-      paidAmount: newMember.paidAmount,
+      grade: newMember.grade || '',
+      subjects: newMember.subjects || '',
+      price: newMember.price || '0',
+      paidAmount: newMember.paidAmount || '0',
       paymentMethod: newMember.paymentMethod as any,
       paymentDate: newMember.paymentDate || new Date().toISOString().split('T')[0],
-      teacherName: newMember.teacherName
+      teacherName: newMember.teacherName || ''
     };
 
     try {
+      // Check if teacherName is new and add it to settings if so
+      if (newMember.teacherName && !settings.teachers?.includes(newMember.teacherName)) {
+        const updatedTeachers = [...(settings.teachers || []), newMember.teacherName];
+        const newSettings = { ...settings, teachers: updatedTeachers };
+        setSettings(newSettings);
+        await updateDoc(doc(db, 'settings', 'global'), { teachers: updatedTeachers });
+      }
+
       await setDoc(doc(db, 'members', id), member);
-      setIsAddModalOpen(false);
-      showNotif('تمت إضافة المشترك بنجاح');
-      setNewMember({ 
-        name: '', 
-        phone: '', 
-        startDate: '', 
-        endDate: '', 
-        subscriptionDays: 30,
-        sessionsCount: 12,
-        grade: 'التأسيس',
-        subjects: 'حقيبة كاملة',
-        price: '700',
-        paidAmount: '700',
-        paymentMethod: 'كاش',
-        paymentDate: '',
-        teacherName: ''
-      });
+      
+      if (!keepOpen) {
+        setIsAddModalOpen(false);
+      }
+      
+      showNotif('تمت إضافة المشترك بنجاح', 'success');
+      
+      // Clear form state completely - Wiping as requested
+      resetNewMember();
+
+      if (keepOpen) {
+        // Scroll to top of modal to show it's empty
+        const modal = document.querySelector('.custom-scrollbar');
+        if (modal) modal.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     } catch (err) {
       console.error("Error adding member:", err);
       handleFirestoreError(err, OperationType.WRITE, `members/${id}`);
     }
   };
 
-  const handleSaveCourse = async (e: React.FormEvent) => {
+  const handleSaveCourse = async (e: React.FormEvent, keepOpen = false) => {
     e.preventDefault();
-    if (!newCourse.title || !newCourse.instructor) return;
+    if (!newCourse.title || !newCourse.instructor) {
+      showNotif('يرجى ملء البيانات المطلوبة', 'error');
+      return;
+    }
 
     const id = Math.random().toString(36).substr(2, 9);
     const course: Course = {
@@ -347,22 +442,38 @@ export default function App() {
       enrolledCount: 0,
       status: 'upcoming',
       price: newCourse.price || '0',
-      description: newCourse.description || ''
+      duration: newCourse.duration || '',
+      description: newCourse.description || '',
+      cost: newCourse.cost || '0',
+      associationPercentage: newCourse.associationPercentage || '30',
+      isSettled: false,
+      extraIncome: newCourse.extraIncome || '0',
+      extraExpenses: newCourse.extraExpenses || '0'
     };
 
     try {
       await setDoc(doc(db, 'courses', id), course);
-      setView('courses_list');
-      showNotif('تم حفظ الدورة بنجاح');
+      
+      if (!keepOpen) {
+        setView('courses_list');
+      }
+      
+      showNotif('تم حفظ الدورة بنجاح', 'success');
+      
       setNewCourse({
         title: '',
         instructor: '',
         startDate: '',
         endDate: '',
         price: '',
+        duration: '',
         description: '',
         capacity: 20,
-        status: 'upcoming'
+        status: 'upcoming',
+        cost: '',
+        associationPercentage: '30',
+        extraIncome: '',
+        extraExpenses: ''
       });
     } catch (err) {
       console.error("Error saving course:", err);
@@ -370,9 +481,35 @@ export default function App() {
     }
   };
 
-  const handleRegisterTrainee = async (e: React.FormEvent) => {
+  const handleSettleCourse = async (courseId: string) => {
+    try {
+      await updateDoc(doc(db, 'courses', courseId), {
+        isSettled: true,
+        status: 'completed'
+      });
+      showNotif('تمت تسوية حسابات الدورة بنجاح', 'success');
+    } catch (err) {
+      console.error(err);
+      handleFirestoreError(err, OperationType.UPDATE, `courses/${courseId}`);
+    }
+  };
+
+  const handleUpdateCourseFinancials = async (courseId: string, updates: Partial<Course>) => {
+    try {
+      await updateDoc(doc(db, 'courses', courseId), updates);
+      showNotif('تم تحديث البيانات المالية', 'success');
+    } catch (err) {
+      console.error(err);
+      handleFirestoreError(err, OperationType.UPDATE, `courses/${courseId}`);
+    }
+  };
+
+  const handleRegisterTrainee = async (e: React.FormEvent, keepOpen = false) => {
     e.preventDefault();
-    if (!newTrainee.fullName || !newTrainee.courseId) return;
+    if (!newTrainee.fullName || !newTrainee.courseId) {
+      showNotif('يرجى اختيار المتدرب والدورة', 'error');
+      return;
+    }
 
     const id = Math.random().toString(36).substr(2, 9);
     const trainee: Trainee = {
@@ -396,12 +533,17 @@ export default function App() {
           enrolledCount: (course.enrolledCount || 0) + 1
         });
       }
-      setView('courses_trainees');
-      showNotif('تم تسجيل المتدرب بنجاح');
+      
+      if (!keepOpen) {
+        setView('courses_trainees');
+      }
+
+      showNotif('تم تسجيل المتدرب بنجاح', 'success');
+      
       setNewTrainee({
         fullName: '',
         motherPhone: '',
-        courseId: '',
+        courseId: keepOpen ? newTrainee.courseId : '', // Keep course selected if adding multiple
         duration: '',
         amount: '',
         paymentMethod: 'لم يتم الدفع',
@@ -505,6 +647,35 @@ export default function App() {
     }
   };
 
+  const markTeacherAttendance = async (teacherName: string, status: 'حاضر' | 'غائب' | 'غائب بي تعويض') => {
+    const today = new Date().toISOString().split('T')[0];
+    const id = `${teacherName}_${today}`;
+    
+    try {
+      await setDoc(doc(db, 'teacher_attendance', id), {
+        id,
+        teacherName,
+        date: today,
+        status
+      });
+      showNotif(`تم تسجيل ${teacherName} ${status}`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `teacher_attendance/${id}`);
+    }
+  };
+
+  const deleteTeacherAttendance = async (teacherName: string, date?: string) => {
+    const targetDate = date || new Date().toISOString().split('T')[0];
+    const id = `${teacherName}_${targetDate}`;
+    
+    try {
+      await deleteDoc(doc(db, 'teacher_attendance', id));
+      showNotif(`تم حذف تحضير ${teacherName}${date ? ` ليوم ${date}` : ''}`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `teacher_attendance/${id}`);
+    }
+  };
+
   // Sync settings with Firestore
   const updateSettings = async (newSettings: AppSettings) => {
     try {
@@ -530,6 +701,7 @@ export default function App() {
         { id: 'courses_list', label: 'قائمة الدورات' },
         { id: 'courses_add', label: 'إضافة دورة' },
         { id: 'courses_trainees', label: 'تسجيل المتدربين' },
+        { id: 'courses_accounting', label: 'محاسبة الدورات' },
         { id: 'course_fun', label: 'ساعة مرح وساعة فن' },
         { id: 'course_rose', label: 'ورشة صناعة الورد المخملي' },
         { id: 'course_bread', label: 'فن خبز المسح' },
@@ -548,6 +720,7 @@ export default function App() {
       children: (settings.teachers || []).map(t => ({ id: `members_${t}`, label: t, teacherName: t }))
     },
     { id: 'accountant', label: 'المحاسبة المالية', icon: Icons.Calculator },
+    { id: 'teacher_attendance', label: 'تحضير المعلمين', icon: UserCheck },
     { id: 'compensation', label: 'التعويض', icon: RefreshCw },
     { id: 'expiry', label: 'انتهاء المدة', icon: Clock },
     { id: 'about', label: 'عن الجمعية', icon: Heart },
@@ -794,284 +967,536 @@ export default function App() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={() => setIsAddModalOpen(false)}
-                  className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+                  className="absolute inset-0 bg-natural-sidebar/40 backdrop-blur-sm"
                 />
                 <motion.div 
                   initial={{ opacity: 0, scale: 0.95, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto p-8 relative z-10 shadow-2xl border border-natural-border custom-scrollbar"
+                  className="bg-white rounded-[2.5rem] w-full max-w-2xl max-h-[90vh] overflow-hidden relative z-10 shadow-2xl border border-natural-border flex flex-col"
+                  dir="rtl"
                 >
-                  <h3 className="text-xl font-bold mb-6 text-natural-sidebar sticky top-0 bg-white z-10 pb-2">إضافة مشترك جديد</h3>
-                  <form onSubmit={handleAddMember} className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-natural-secondary mb-1">الاسم</label>
-                      <input 
-                        type="text" 
-                        required
-                        className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none"
-                        value={newMember.name}
-                        onChange={e => setNewMember({...newMember, name: e.target.value})}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-natural-secondary mb-1">رقم الهاتف</label>
-                      <input 
-                        type="tel" 
-                        className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none"
-                        value={newMember.phone}
-                        onChange={e => setNewMember({...newMember, phone: e.target.value})}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
+                  {/* Modal Header */}
+                  <div className="p-8 pb-4 bg-gradient-to-br from-white to-natural-bg/30 relative">
+                    <div className="flex justify-between items-center relative z-10">
                       <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="block text-sm font-medium text-natural-secondary">تاريخ البدء</label>
-                          <button 
-                            type="button" 
-                            onClick={() => {
-                              const today = new Date().toISOString().split('T')[0];
-                              setNewMember({...newMember, startDate: today});
-                            }}
-                            className="text-[10px] text-natural-accent hover:underline font-bold"
-                          >
-                            اليوم
-                          </button>
-                        </div>
-                        <input 
-                          type="date" 
-                          required
-                          className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none text-sm text-natural-primary text-center"
-                          value={newMember.startDate}
-                          onChange={e => {
-                            const start = e.target.value;
-                            let newEnd = newMember.endDate;
-                            if (start && newMember.subscriptionDays) {
-                              try {
-                                const d = new Date(start);
-                                d.setDate(d.getDate() + (newMember.subscriptionDays || 0));
-                                if (!isNaN(d.getTime())) {
-                                  newEnd = d.toISOString().split('T')[0];
-                                }
-                              } catch(err) {}
-                            }
-                            setNewMember({...newMember, startDate: start, endDate: newEnd});
-                          }}
-                        />
+                        <h3 className="text-2xl font-black text-natural-sidebar flex items-center gap-3">
+                          <div className="w-10 h-10 bg-natural-accent/10 rounded-xl flex items-center justify-center text-natural-accent">
+                            <Icons.UserPlus size={24} />
+                          </div>
+                          إضافة مشترك جديد
+                        </h3>
+                        <p className="text-natural-secondary text-xs mt-2 mr-13 font-bold">يرجى إكمال جميع الحقول المطلوبة لتسجيل العضو الجديد</p>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-natural-secondary mb-1">مدة الاشتراك (يوم)</label>
-                        <input 
-                          type="number" 
-                          className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none font-bold text-center"
-                          value={newMember.subscriptionDays || ''}
-                          onChange={e => {
-                            const days = parseInt(e.target.value) || 0;
-                            let newEnd = newMember.endDate;
-                            if (newMember.startDate && newMember.startDate.length === 10) {
-                              try {
-                                const d = new Date(newMember.startDate);
-                                d.setDate(d.getDate() + days);
-                                if (!isNaN(d.getTime())) {
-                                  newEnd = d.toISOString().split('T')[0];
-                                }
-                              } catch(err) {}
-                            }
-                            setNewMember({...newMember, subscriptionDays: days, endDate: newEnd});
-                          }}
-                        />
-                        <p className="text-[10px] text-natural-secondary mt-1 text-center font-bold">ينتهي في: {newMember.endDate || '-'}</p>
-                      </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-natural-secondary mb-1">تاريخ الانتهاء</label>
-                        <input 
-                          type="date" 
-                          required
-                          className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none text-sm text-natural-primary text-center"
-                          value={newMember.endDate}
-                          onChange={e => setNewMember({...newMember, endDate: e.target.value})}
-                        />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-natural-secondary mb-1">المعلم/ة</label>
-                        <input 
-                          list="teachersList"
-                          className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none text-sm"
-                          value={newMember.teacherName}
-                          onChange={e => setNewMember({...newMember, teacherName: e.target.value})}
-                          placeholder="اختر أو اكتب اسم المعلم"
-                        />
-                        <datalist id="teachersList">
-                          {(settings.teachers || []).map(teacher => (
-                            <option key={teacher} value={teacher} />
-                          ))}
-                        </datalist>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-natural-secondary mb-1">الصف</label>
-                        <input 
-                          list="gradesList"
-                          className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none text-sm"
-                          value={newMember.grade}
-                          onChange={e => setNewMember({...newMember, grade: e.target.value})}
-                          placeholder="اختر أو اكتب الصف"
-                        />
-                        <datalist id="gradesList">
-                          <option value="التأسيس" />
-                          <option value="الابتدائي" />
-                          <option value="ثاني" />
-                          <option value="ثالث" />
-                          <option value="رابع" />
-                          <option value="خامس" />
-                          <option value="سادس" />
-                          <option value="اول متوسط" />
-                        </datalist>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-natural-secondary mb-1">عدد المواد</label>
-                        <input 
-                          list="subjectsList"
-                          className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none text-sm"
-                          value={newMember.subjects}
-                          onChange={e => setNewMember({...newMember, subjects: e.target.value})}
-                          placeholder="اختر أو اكتب المواد"
-                        />
-                        <datalist id="subjectsList">
-                          <option value="حقيبة كاملة" />
-                          <option value="انجليزي" />
-                          <option value="رياضيات" />
-                          <option value="لغتي" />
-                          <option value="رياضيات والانجليزي" />
-                        </datalist>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-natural-secondary mb-1">عدد الحصص</label>
-                        <input 
-                          type="text" 
-                          className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none font-bold"
-                          placeholder="مثلاً: 12"
-                          value={newMember.sessionsCount || ''}
-                          onChange={e => {
-                            const val = e.target.value;
-                            if (val === '' || /^\d+$/.test(val)) {
-                              setNewMember({...newMember, sessionsCount: val === '' ? 0 : parseInt(val)})
-                            }
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-natural-secondary mb-1">السعر (ر.س)</label>
-                        <input 
-                          type="text" 
-                          className="w-full p-3 bg-natural-bg border-none rounded-xl focus:ring-2 focus:ring-natural-accent outline-none text-sm font-bold"
-                          placeholder="أدخل السعر..."
-                          value={newMember.price}
-                          onChange={e => setNewMember({...newMember, price: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="flex flex-wrap gap-2">
-                      {['700', '550', '500', '350', '250', '150', '70', '50'].map(p => (
-                        <button
-                          key={p}
+                      <div className="flex items-center gap-2">
+                        <button 
                           type="button"
-                          onClick={() => setNewMember({...newMember, price: p})}
-                          className={`px-3 py-1 text-xs rounded-lg border transition-all ${
-                            newMember.price === p 
-                              ? 'bg-natural-accent text-white border-natural-accent shadow-sm' 
-                              : 'bg-white text-natural-secondary border-natural-border hover:bg-natural-bg'
-                          }`}
+                          onClick={() => resetNewMember()}
+                          className="px-3 py-1.5 text-[10px] font-black text-natural-secondary hover:text-red-500 hover:bg-red-50 rounded-lg transition-all flex items-center gap-1.5"
+                          title="مسح كافة المدخلات"
                         >
-                          {p}
+                          <Icons.RotateCcw size={14} />
+                          مسح الكل
                         </button>
-                      ))}
-                    </div>
-
-                    <div className="pt-4 border-t border-natural-border mt-2 space-y-4">
-                      <h4 className="text-sm font-bold text-natural-sidebar flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 bg-natural-accent rounded-full"></span>
-                        بيانات الدفع
-                      </h4>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-medium text-natural-secondary mb-1">المبلغ المدفوع</label>
-                          <input 
-                            type="text" 
-                            className="w-full p-2.5 bg-natural-bg border-none rounded-lg focus:ring-2 focus:ring-natural-accent outline-none text-sm font-bold"
-                            value={newMember.paidAmount}
-                            onChange={e => setNewMember({...newMember, paidAmount: e.target.value})}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-medium text-natural-secondary mb-1">طريقة الدفع</label>
-                          <select 
-                            className="w-full p-2.5 bg-natural-bg border-none rounded-lg focus:ring-2 focus:ring-natural-accent outline-none text-sm appearance-none"
-                            value={newMember.paymentMethod}
-                            onChange={e => {
-                              const method = e.target.value as any;
-                              const updates: any = { paymentMethod: method };
-                              if (method === 'لم يتم الدفع') {
-                                updates.paidAmount = '0';
-                                updates.paymentDate = '';
-                              }
-                              setNewMember({...newMember, ...updates});
-                            }}
-                          >
-                            <option value="كاش">كاش</option>
-                            <option value="تحويل">تحويل</option>
-                            <option value="لم يتم الدفع">لم يتم الدفع</option>
-                          </select>
-                        </div>
+                        <button 
+                          type="button"
+                          onClick={() => setIsAddModalOpen(false)}
+                          className="w-10 h-10 flex items-center justify-center rounded-2xl hover:bg-red-50 text-natural-secondary hover:text-red-500 transition-all"
+                        >
+                          <Icons.X size={20} />
+                        </button>
                       </div>
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="block text-[10px] font-medium text-natural-secondary">تاريخ الدفع</label>
-                          <button 
-                            type="button" 
-                            onClick={() => {
-                              const today = new Date().toISOString().split('T')[0];
-                              setNewMember({...newMember, paymentDate: today});
-                            }}
-                            className="text-[9px] text-natural-accent hover:underline font-bold"
-                          >
-                            اليوم
-                          </button>
+                    </div>
+                  </div>
+
+                  <form id="add-member-form" onSubmit={handleAddMember} className="flex-1 overflow-y-auto p-8 pt-4 custom-scrollbar space-y-8">
+                    {/* Basic Info Section */}
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-black text-natural-sidebar flex items-center gap-2 mb-4">
+                        <span className="w-8 h-8 bg-natural-bg rounded-lg flex items-center justify-center text-natural-accent">
+                          <Icons.User size={16} />
+                        </span>
+                        بيانات المشترك الأساسية
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-natural-secondary uppercase tracking-wider mr-2">الاسم الكامل <span className="text-red-500">*</span></label>
+                          <div className="relative group">
+                            <input 
+                              id="member-name"
+                              type="text" 
+                              required
+                              autoFocus
+                              placeholder="أدخل اسم المشترك..."
+                              className="w-full p-4 pr-12 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-2xl outline-none transition-all text-sm font-bold"
+                              value={newMember.name}
+                              onChange={e => setNewMember({...newMember, name: e.target.value})}
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setNewMember({...newMember, name: ''});
+                                document.getElementById('member-name')?.focus();
+                              }}
+                              className={`absolute right-4 top-1/2 -translate-y-1/2 transition-all ${
+                                newMember.name ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                              }`}
+                            >
+                              <Icons.User size={20} />
+                            </button>
+                          </div>
                         </div>
-                        <div className="relative">
-                          <input 
-                            type="date" 
-                            className="w-full p-2.5 bg-natural-bg border-none rounded-lg focus:ring-2 focus:ring-natural-accent outline-none text-sm pr-9 text-right"
-                            value={newMember.paymentDate}
-                            onChange={e => setNewMember({...newMember, paymentDate: e.target.value})}
-                          />
-                          <div className="absolute top-1/2 right-3 -translate-y-1/2 text-natural-secondary pointer-events-none">
-                            <Calendar size={16} />
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-natural-secondary uppercase tracking-wider mr-2">رقم الهاتف (اختياري)</label>
+                          <div className="relative group">
+                            <input 
+                              id="member-phone"
+                              type="tel" 
+                              placeholder="05xxxxxxxx"
+                              className="w-full p-4 pr-12 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-2xl outline-none transition-all text-sm font-bold"
+                              value={newMember.phone}
+                              onChange={e => setNewMember({...newMember, phone: e.target.value})}
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setNewMember({...newMember, phone: ''});
+                                document.getElementById('member-phone')?.focus();
+                              }}
+                              className={`absolute right-4 top-1/2 -translate-y-1/2 transition-all ${
+                                newMember.phone ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                              }`}
+                            >
+                              <Icons.Phone size={20} />
+                            </button>
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex gap-3 pt-6 sticky bottom-0 bg-white z-10 mt-auto border-t border-natural-border">
-                      <button 
-                        type="submit"
-                        className="flex-1 bg-natural-accent text-white p-3 rounded-xl font-bold hover:bg-opacity-90 transition-colors shadow-lg shadow-natural-accent/20"
-                      >
-                        حفظ العضو
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => setIsAddModalOpen(false)}
-                        className="flex-1 bg-natural-bg text-natural-secondary p-3 rounded-xl font-bold hover:bg-natural-border transition-colors border border-natural-border"
-                      >
-                        إلغاء
-                      </button>
+                    {/* Subscription Details Section */}
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-black text-natural-sidebar flex items-center gap-2 mb-4">
+                        <span className="w-8 h-8 bg-natural-bg rounded-lg flex items-center justify-center text-natural-accent">
+                          <Icons.Calendar size={16} />
+                        </span>
+                        تفاصيل الاشتراك
+                      </h4>
+                      <div className="bg-natural-bg/20 p-6 rounded-[2rem] border border-natural-border/50">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-natural-secondary mr-2">تاريخ البدء</label>
+                            <div className="relative group">
+                              <input 
+                                id="member-start-date"
+                                type="date" 
+                                required
+                                className="w-full p-3.5 pr-10 bg-white border border-natural-border rounded-xl focus:border-natural-accent outline-none text-xs font-bold text-center"
+                                value={newMember.startDate}
+                                onChange={e => {
+                                  const start = e.target.value;
+                                  let newEnd = newMember.endDate;
+                                  if (start && newMember.subscriptionDays) {
+                                    try {
+                                      const d = new Date(start);
+                                      d.setDate(d.getDate() + (newMember.subscriptionDays || 0));
+                                      if (!isNaN(d.getTime())) {
+                                        newEnd = d.toISOString().split('T')[0];
+                                      }
+                                    } catch(err) {}
+                                  }
+                                  setNewMember({...newMember, startDate: start, endDate: newEnd});
+                                }}
+                              />
+                              <Icons.Calendar 
+                                className={`absolute right-3 top-1/2 -translate-y-1/2 transition-colors ${newMember.startDate ? 'text-natural-accent' : 'text-natural-secondary/30'}`} 
+                                size={14} 
+                              />
+                            </div>
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                const today = new Date().toISOString().split('T')[0];
+                                setNewMember({...newMember, startDate: today});
+                              }}
+                              className="w-full text-[10px] text-natural-accent font-black hover:bg-natural-accent/5 py-1 rounded-lg transition-colors mt-1"
+                            >
+                              اختيار اليوم
+                            </button>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-natural-secondary mr-2 text-center block">مدة الاشتراك</label>
+                            <div className="flex items-center gap-2">
+                              <input 
+                                type="number" 
+                                className="w-full p-3.5 bg-white border border-natural-border rounded-xl focus:border-natural-accent outline-none font-bold text-center text-xs"
+                                value={newMember.subscriptionDays || ''}
+                                placeholder="30"
+                                onChange={e => {
+                                  const days = parseInt(e.target.value) || 0;
+                                  let newEnd = newMember.endDate;
+                                  if (newMember.startDate && newMember.startDate.length === 10) {
+                                    try {
+                                      const d = new Date(newMember.startDate);
+                                      d.setDate(d.getDate() + days);
+                                      if (!isNaN(d.getTime())) {
+                                        newEnd = d.toISOString().split('T')[0];
+                                      }
+                                    } catch(err) {}
+                                  }
+                                  setNewMember({...newMember, subscriptionDays: days, endDate: newEnd});
+                                }}
+                              />
+                              <span className="text-[10px] font-bold text-natural-secondary">يوم</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-natural-secondary mr-2">تاريخ الانتهاء</label>
+                            <div className="relative group">
+                              <input 
+                                id="member-end-date"
+                                type="date" 
+                                required
+                                className="w-full p-3.5 pr-10 bg-white border border-natural-border rounded-xl focus:border-natural-accent outline-none text-xs font-bold text-center"
+                                value={newMember.endDate}
+                                onChange={e => setNewMember({...newMember, endDate: e.target.value})}
+                              />
+                              <Icons.Timer 
+                                className={`absolute right-3 top-1/2 -translate-y-1/2 transition-colors ${newMember.endDate ? 'text-natural-accent' : 'text-natural-secondary/30'}`} 
+                                size={14} 
+                              />
+                            </div>
+                            <p className="text-[9px] text-natural-sidebar mt-1 text-center font-black">
+                              {newMember.endDate ? `تنتهي في ${newMember.endDate}` : 'ادخل المدة أو التاريخ'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Educational Details Section */}
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-black text-natural-sidebar flex items-center gap-2 mb-4">
+                        <span className="w-8 h-8 bg-natural-bg rounded-lg flex items-center justify-center text-natural-accent">
+                          <Icons.GraduationCap size={16} />
+                        </span>
+                        بيانات الحلقة والدراسة
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-natural-secondary mr-2">المعلم/ة</label>
+                          <div className="relative group">
+                            <input 
+                              id="member-teacher"
+                              list="teachersList"
+                              className="w-full p-3.5 pr-10 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-xl outline-none transition-all text-xs font-bold"
+                              value={newMember.teacherName}
+                              onChange={e => setNewMember({...newMember, teacherName: e.target.value})}
+                              placeholder="اسم المعلم"
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setNewMember({...newMember, teacherName: ''});
+                                document.getElementById('member-teacher')?.focus();
+                              }}
+                              className={`absolute right-3.5 top-1/2 -translate-y-1/2 transition-all ${
+                                newMember.teacherName ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                              }`}
+                            >
+                              <Icons.UserCheck size={18} />
+                            </button>
+                            <datalist id="teachersList">
+                              {(settings.teachers || []).map(teacher => (
+                                <option key={teacher} value={teacher} />
+                              ))}
+                            </datalist>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-natural-secondary mr-2">الصف</label>
+                            <div className="relative group">
+                              <input 
+                                id="member-grade"
+                                list="gradesList"
+                                className="w-full p-3.5 pr-10 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-xl outline-none transition-all text-xs font-bold"
+                                value={newMember.grade}
+                                onChange={e => setNewMember({...newMember, grade: e.target.value})}
+                                placeholder="الصف الدراسي"
+                              />
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  setNewMember({...newMember, grade: ''});
+                                  document.getElementById('member-grade')?.focus();
+                                }}
+                                className={`absolute right-3.5 top-1/2 -translate-y-1/2 transition-all ${
+                                  newMember.grade ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                                }`}
+                              >
+                                <Icons.School size={16} />
+                              </button>
+                            <datalist id="gradesList">
+                              <option value="التأسيس" />
+                              <option value="الابتدائي" />
+                              <option value="ثاني" />
+                              <option value="ثالث" />
+                              <option value="رابع" />
+                              <option value="خامس" />
+                              <option value="سادس" />
+                              <option value="اول متوسط" />
+                            </datalist>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-natural-secondary mr-2">عدد المواد</label>
+                            <div className="relative group">
+                              <input 
+                                id="member-subjects"
+                                list="subjectsList"
+                                className="w-full p-3.5 pr-10 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-xl outline-none transition-all text-xs font-bold"
+                                value={newMember.subjects}
+                                onChange={e => setNewMember({...newMember, subjects: e.target.value})}
+                                placeholder="اختر المواد"
+                              />
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  setNewMember({...newMember, subjects: ''});
+                                  document.getElementById('member-subjects')?.focus();
+                                }}
+                                className={`absolute right-3.5 top-1/2 -translate-y-1/2 transition-all ${
+                                  newMember.subjects ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                                }`}
+                              >
+                                <Icons.Book size={16} />
+                              </button>
+                            <datalist id="subjectsList">
+                              <option value="حقيبة كاملة" />
+                              <option value="انجليزي" />
+                              <option value="رياضيات" />
+                              <option value="لغتي" />
+                            </datalist>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-natural-secondary mr-2">عدد الحصص</label>
+                          <div className="relative group">
+                            <input 
+                              id="member-sessions"
+                              type="text" 
+                              className="w-full p-3.5 pr-10 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-xl outline-none transition-all text-xs font-bold text-center"
+                              placeholder="مثلاً: 12"
+                              value={newMember.sessionsCount || ''}
+                              onChange={e => {
+                                const val = e.target.value;
+                                if (val === '' || /^\d+$/.test(val)) {
+                                  setNewMember({...newMember, sessionsCount: val === '' ? 0 : parseInt(val)})
+                                }
+                              }}
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setNewMember({...newMember, sessionsCount: 0});
+                                document.getElementById('member-sessions')?.focus();
+                              }}
+                              className={`absolute right-3.5 top-1/2 -translate-y-1/2 transition-all ${
+                                newMember.sessionsCount ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                              }`}
+                            >
+                              <Icons.Hash size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Financial Details Section */}
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-black text-natural-sidebar flex items-center gap-2 mb-4">
+                        <span className="w-8 h-8 bg-natural-bg rounded-lg flex items-center justify-center text-natural-accent">
+                          <Icons.Wallet size={16} />
+                        </span>
+                        التحصيل المالي
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-natural-secondary mr-2">سعر الاشتراك</label>
+                          <div className="relative group">
+                            <input 
+                              id="member-price"
+                              type="text" 
+                              className="w-full p-4 pr-12 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-[1.25rem] outline-none transition-all text-sm font-black"
+                              placeholder="0.00"
+                              value={newMember.price}
+                              onChange={e => setNewMember({...newMember, price: e.target.value})}
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setNewMember({...newMember, price: ''});
+                                document.getElementById('member-price')?.focus();
+                              }}
+                              className={`absolute right-4 top-1/2 -translate-y-1/2 transition-all ${
+                                newMember.price ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                              }`}
+                            >
+                              <Icons.DollarSign size={20} />
+                            </button>
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-natural-secondary">ر.س</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {['700', '500', '350', '250', '150'].map(p => (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => setNewMember({...newMember, price: p})}
+                                className={`px-2 py-1 text-[9px] rounded-lg border font-bold transition-all ${
+                                  newMember.price === p 
+                                    ? 'bg-natural-accent text-white border-natural-accent' 
+                                    : 'bg-white text-natural-secondary border-natural-border hover:bg-natural-bg'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-natural-secondary mr-2">المبلغ المسدد</label>
+                          <div className="relative group">
+                            <input 
+                              id="member-paid"
+                              type="text" 
+                              className="w-full p-4 pr-12 bg-natural-bg/80 border border-transparent focus:border-natural-accent focus:bg-white rounded-[1.25rem] outline-none transition-all text-sm font-black text-natural-accent"
+                              placeholder="0.00"
+                              value={newMember.paidAmount}
+                              onChange={e => setNewMember({...newMember, paidAmount: e.target.value})}
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setNewMember({...newMember, paidAmount: ''});
+                                document.getElementById('member-paid')?.focus();
+                              }}
+                              className={`absolute right-4 top-1/2 -translate-y-1/2 transition-all ${
+                                newMember.paidAmount ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                              }`}
+                            >
+                              <Icons.CreditCard size={20} />
+                            </button>
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-natural-accent">مدفوع</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-natural-secondary mr-2">طريقة الدفع</label>
+                          <div className="grid grid-cols-1 gap-2">
+                            <select 
+                              className="w-full p-4 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-[1.25rem] outline-none transition-all text-xs font-bold appearance-none"
+                              value={newMember.paymentMethod}
+                              onChange={e => {
+                                const method = e.target.value as any;
+                                const updates: any = { paymentMethod: method };
+                                if (method === 'لم يتم الدفع') {
+                                  updates.paidAmount = '0';
+                                  updates.paymentDate = '';
+                                }
+                                setNewMember({...newMember, ...updates});
+                              }}
+                            >
+                              <option value="كاش">نقدي (كاش)</option>
+                              <option value="تحويل">تحويل مصرفي</option>
+                              <option value="لم يتم الدفع">لم يتم الدفع بعد</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+                        <div className="space-y-2">
+                           <div className="flex justify-between items-center mr-2">
+                            <label className="text-[10px] font-black text-natural-secondary uppercase tracking-wider">تاريخ الدفع</label>
+                            <button 
+                              type="button" 
+                              onClick={() => setNewMember({...newMember, paymentDate: new Date().toISOString().split('T')[0]})}
+                              className="text-[9px] text-natural-accent font-black hover:underline"
+                            >
+                              اليوم
+                            </button>
+                           </div>
+                           <div className="relative group">
+                            <input 
+                              id="member-payment-date"
+                              type="date" 
+                              className="w-full p-4 pr-12 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-[1.25rem] outline-none transition-all text-xs font-bold"
+                              value={newMember.paymentDate}
+                              onChange={e => setNewMember({...newMember, paymentDate: e.target.value})}
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setNewMember({...newMember, paymentDate: ''});
+                                document.getElementById('member-payment-date')?.focus();
+                              }}
+                              className={`absolute right-4 top-1/2 -translate-y-1/2 transition-all ${
+                                newMember.paymentDate ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                              }`}
+                            >
+                              <Icons.CalendarCheck size={20} />
+                            </button>
+                           </div>
+                        </div>
+                        <div className="space-y-2">
+                           <label className="text-[10px] font-black text-natural-secondary mr-2">ملاحظات إضافية</label>
+                           <div className="relative group">
+                            <input 
+                              id="member-notes"
+                              className="w-full p-4 pr-12 bg-natural-bg/50 border border-transparent focus:border-natural-accent focus:bg-white rounded-[1.25rem] outline-none transition-all text-xs font-bold"
+                              placeholder="أي ملاحظات تخص المشترك..."
+                              value={newMember.notes || ''}
+                              onChange={e => setNewMember({...newMember, notes: e.target.value})}
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setNewMember({...newMember, notes: ''});
+                                document.getElementById('member-notes')?.focus();
+                              }}
+                              className={`absolute right-4 top-1/2 -translate-y-1/2 transition-all ${
+                                newMember.notes ? 'text-natural-accent scale-110' : 'text-natural-secondary/30 pointer-events-none'
+                              }`}
+                            >
+                              <Icons.MessageSquare size={20} />
+                            </button>
+                           </div>
+                        </div>
+                      </div>
                     </div>
                   </form>
+
+                  {/* Modal Footer */}
+                  <div className="p-8 border-t border-natural-border bg-white flex flex-col md:flex-row gap-3">
+                    <button 
+                      type="button"
+                      onClick={(e) => handleAddMember(e, false)}
+                      className="flex-[2] bg-natural-sidebar text-white p-5 rounded-[1.5rem] font-bold hover:bg-opacity-95 transition-all shadow-xl shadow-natural-sidebar/10 flex items-center justify-center gap-3 group"
+                    >
+                      <Icons.Save size={20} className="group-hover:scale-110 transition-transform" />
+                      حفظ
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setIsAddModalOpen(false)}
+                      className="flex-1 bg-natural-bg text-natural-sidebar p-5 rounded-[1.5rem] font-bold hover:bg-natural-border transition-all border border-natural-border"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
                 </motion.div>
               </div>
             )}
@@ -1084,6 +1509,24 @@ export default function App() {
                 setSettings={setSettings}
                 showTotalAmount={showTotalAmount} 
                 setIsPasswordModalOpen={setIsPasswordModalOpen}
+                teacherAttendance={teacherAttendance}
+                markTeacherAttendance={markTeacherAttendance}
+                deleteTeacherAttendance={deleteTeacherAttendance}
+              />
+            )}
+
+            {view === 'teacher_attendance' && (
+              <TeacherAttendanceView 
+                teachers={settings.teachers || []}
+                attendance={teacherAttendance}
+                markAttendance={markTeacherAttendance}
+                deleteAttendance={deleteTeacherAttendance}
+                onAddTeacher={(name: string) => {
+                  if (name.trim() && !settings.teachers?.includes(name.trim())) {
+                    const updatedTeachers = [...(settings.teachers || []), name.trim()];
+                    updateSettings({ ...settings, teachers: updatedTeachers });
+                  }
+                }}
               />
             )}
 
@@ -1106,14 +1549,17 @@ export default function App() {
                       <p className="text-natural-secondary mt-1">مرحباً بك مجدداً في لوحة إدارة الموهبة ✨</p>
                     </div>
                   </div>
-                  <div className="flex gap-3 w-full md:w-auto">
-                    <button 
-                      onClick={() => setIsAddModalOpen(true)}
-                      className="flex-1 md:flex-none bg-natural-accent text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-natural-accent/20 flex items-center justify-center gap-2 hover:scale-105 transition-all"
-                    >
-                      <Plus size={20} />
-                      مشترك جديد
-                    </button>
+                    <div className="flex gap-3 w-full md:w-auto">
+                      <button 
+                        onClick={() => {
+                          resetNewMember();
+                          setIsAddModalOpen(true);
+                        }}
+                        className="flex-1 md:flex-none bg-natural-accent text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-natural-accent/20 flex items-center justify-center gap-2 hover:scale-105 transition-all"
+                      >
+                        <Plus size={20} />
+                        مشترك جديد
+                      </button>
                     <button 
                       onClick={() => setView('attendance')}
                       className="flex-1 md:flex-none bg-natural-sidebar text-white px-6 py-3 rounded-2xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-opacity-90 transition-all"
@@ -1409,6 +1855,38 @@ export default function App() {
                         className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all" 
                       />
                     </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-natural-sidebar block px-1">المدة (مثلاً: 4 أسابيع)</label>
+                      <input 
+                         type="text" 
+                         value={newCourse.duration}
+                         onChange={(e) => setNewCourse({...newCourse, duration: e.target.value})}
+                         placeholder="اسبوع - يوم" 
+                         className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all" 
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-natural-sidebar block px-1">التكلفة التشغيلية (ر.س)</label>
+                      <input 
+                        type="number" 
+                        value={newCourse.cost}
+                        onChange={(e) => setNewCourse({...newCourse, cost: e.target.value})}
+                        placeholder="0" 
+                        className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all" 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-natural-sidebar block px-1">نسبة الجمعية (%)</label>
+                      <input 
+                        type="number" 
+                        value={newCourse.associationPercentage}
+                        onChange={(e) => setNewCourse({...newCourse, associationPercentage: e.target.value})}
+                        placeholder="30" 
+                        className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all" 
+                      />
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-natural-sidebar block px-1">وصف الدورة</label>
@@ -1420,9 +1898,14 @@ export default function App() {
                       className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all"
                     ></textarea>
                   </div>
-                  <div className="pt-4 flex gap-4">
-                    <button type="submit" className="flex-1 bg-natural-accent text-white py-4 rounded-2xl font-bold shadow-lg shadow-natural-accent/20 hover:scale-[1.02] active:scale-95 transition-all">
-                      حفظ الدورة
+                  <div className="pt-4 flex flex-col md:flex-row gap-4">
+                    <button 
+                      type="button" 
+                      onClick={(e) => handleSaveCourse(e, false)}
+                      className="flex-[2] bg-natural-sidebar text-white py-4 rounded-2xl font-bold shadow-lg shadow-natural-sidebar/10 hover:bg-opacity-90 transition-all flex items-center justify-center gap-2 group"
+                    >
+                      <Icons.Save size={20} className="group-hover:scale-110 transition-transform" />
+                      حفظ
                     </button>
                     <button type="button" onClick={() => setView('courses_list')} className="px-8 bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all">
                       إلغاء
@@ -1459,7 +1942,19 @@ export default function App() {
                       </button>
                     )}
                     <button 
-                      onClick={() => setView('courses_trainee_add')}
+                      onClick={() => {
+                        setNewTrainee({
+                          fullName: '',
+                          motherPhone: '',
+                          courseId: selectedCourseId || '',
+                          amount: '',
+                          paymentMethod: 'كاش',
+                          duration: 'شهر',
+                          date: new Date().toISOString().split('T')[0],
+                          notes: ''
+                        });
+                        setView('courses_trainee_add');
+                      }}
                       className="bg-natural-accent text-white px-6 py-2.5 rounded-2xl flex items-center gap-2 hover:bg-opacity-90 transition-all font-bold shadow-lg shadow-natural-accent/20"
                     >
                       <Plus size={20} />
@@ -1568,9 +2063,8 @@ export default function App() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-xs font-bold text-natural-sidebar block px-1">رقم جوال الأم</label>
+                      <label className="text-xs font-bold text-natural-sidebar block px-1">رقم جوال الأم (اختياري)</label>
                       <input 
-                        required
                         type="tel" 
                         value={newTrainee.motherPhone}
                         onChange={(e) => setNewTrainee({...newTrainee, motherPhone: e.target.value})}
@@ -1656,15 +2150,564 @@ export default function App() {
                     ></textarea>
                   </div>
 
-                  <div className="pt-4 flex gap-4">
-                    <button type="submit" className="flex-1 bg-natural-accent text-white py-4 rounded-2xl font-bold shadow-lg shadow-natural-accent/20 hover:scale-[1.02] active:scale-95 transition-all">
-                      حفظ وتسجيل المتدرب
+                  <div className="pt-4 flex flex-col md:flex-row gap-4">
+                    <button 
+                      type="button" 
+                      onClick={(e) => handleRegisterTrainee(e, false)}
+                      className="flex-[2] bg-natural-sidebar text-white py-4 rounded-2xl font-bold shadow-lg shadow-natural-sidebar/10 hover:bg-opacity-90 transition-all flex items-center justify-center gap-2 group"
+                    >
+                      <Icons.Save size={20} className="group-hover:scale-110 transition-transform" />
+                      حفظ
                     </button>
                     <button type="button" onClick={() => setView('courses_trainees')} className="px-8 bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all">
                       إلغاء
                     </button>
                   </div>
                 </form>
+              </motion.div>
+            )}
+
+            {view === 'courses_accounting' && (
+              <motion.div
+                key="courses_accounting"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-6"
+              >
+                <div className="flex flex-col md:flex-row items-center justify-between mb-8 pb-4 border-b-2 border-natural-sidebar/10 text-right gap-4" dir="rtl">
+                  <div className="flex-1">
+                    <h2 className="text-3xl font-black text-natural-sidebar mb-1">محاسبة الدورات</h2>
+                    <p className="text-sm font-medium text-natural-secondary mt-1">
+                      {selectedAccountingCourseId ? (
+                        <span className="flex items-center gap-1">
+                          التقرير المالي التفصيلي لـ: 
+                          <span className="text-natural-accent font-black">
+                            {courses.find(c => c.id === selectedAccountingCourseId)?.title}
+                          </span>
+                        </span>
+                      ) : (
+                        `تقرير شامل للدورات الحالية: ${courses.map(c => c.title).join(' • ')}`
+                      )}
+                    </p>
+                  </div>
+                  
+                  {!selectedAccountingCourseId && courses.length > 0 && (
+                    <div className="hidden lg:flex flex-wrap gap-2 max-w-xl justify-end" dir="rtl">
+                      {courses.slice(0, 5).map(c => (
+                        <button 
+                          key={c.id}
+                          onClick={() => setSelectedAccountingCourseId(c.id)}
+                          className="px-3 py-1.5 bg-natural-sidebar/5 border border-natural-sidebar/10 rounded-xl text-[10px] font-black text-natural-sidebar hover:bg-natural-accent hover:text-white hover:border-natural-accent transition-all animate-in fade-in slide-in-from-top-2"
+                        >
+                          {c.title}
+                        </button>
+                      ))}
+                      {courses.length > 5 && <span className="text-[10px] font-bold text-natural-secondary flex items-center">+{courses.length - 5} دورة أخرى</span>}
+                    </div>
+                  )}
+                  
+                  <div className="flex items-center gap-3 w-full md:w-auto">
+                    <div className="relative w-full md:w-64">
+                      <select 
+                        value={selectedAccountingCourseId || ''} 
+                        onChange={(e) => setSelectedAccountingCourseId(e.target.value || null)}
+                        className="w-full p-3 pr-10 bg-white border-2 border-natural-border focus:border-natural-accent rounded-2xl outline-none appearance-none font-bold text-sm text-natural-sidebar shadow-sm cursor-pointer"
+                      >
+                        <option value="">جميع الدورات (نظرة عامة)</option>
+                        {courses.map(c => (
+                          <option key={c.id} value={c.id}>{c.title}</option>
+                        ))}
+                      </select>
+                      <Icons.ChevronDown size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-natural-secondary pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {!selectedAccountingCourseId && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-natural-border flex items-center justify-between transition-all hover:shadow-md">
+                        <div>
+                          <span className="text-[10px] font-black text-natural-secondary uppercase block mb-1">إجمالي المتدربين</span>
+                          <span className="text-2xl font-black text-natural-sidebar">{trainees.length}</span>
+                        </div>
+                        <div className="h-10 w-10 rounded-xl bg-natural-sidebar/5 flex items-center justify-center text-natural-sidebar">
+                          <Icons.Users size={20} />
+                        </div>
+                      </div>
+                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-natural-border flex items-center justify-between transition-all hover:shadow-md">
+                        <div>
+                          <span className="text-[10px] font-black text-natural-secondary uppercase block mb-1">إجمالي الدخل</span>
+                          <span className="text-2xl font-black text-natural-accent">
+                            {trainees.filter(t => t.paymentMethod !== 'لم يتم الدفع').reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0).toLocaleString()} ر.س
+                          </span>
+                        </div>
+                        <div className="h-10 w-10 rounded-xl bg-natural-accent/5 flex items-center justify-center text-natural-accent">
+                          <Icons.TrendingUp size={20} />
+                        </div>
+                      </div>
+                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-natural-border flex items-center justify-between transition-all hover:shadow-md">
+                        <div>
+                          <span className="text-[10px] font-black text-red-500 uppercase block mb-1">مبالغ متبقية</span>
+                          <span className="text-2xl font-black text-red-600">
+                            {trainees.filter(t => t.paymentMethod === 'لم يتم الدفع').reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0).toLocaleString()} ر.س
+                          </span>
+                        </div>
+                        <div className="h-10 w-10 rounded-xl bg-red-50 flex items-center justify-center text-red-600">
+                          <Icons.Clock size={20} />
+                        </div>
+                      </div>
+
+                      {/* Course Titles Ribbon - Specific Highlights */}
+                      <div className="md:col-span-3 overflow-x-auto no-scrollbar pb-2">
+                        <div className="flex flex-col gap-3" dir="rtl">
+                          <div className="flex items-center gap-2">
+                            <span className="shrink-0 text-[10px] font-black text-natural-secondary bg-natural-bg px-2 py-1 rounded-lg">الدورات النشطة:</span>
+                            <div className="flex items-center gap-2">
+                              {['ساعة مرح وساعة فن', 'ورشة صناعة الورد المخملي', 'فن خبز المسح'].map((title, idx) => (
+                                <div 
+                                  key={idx}
+                                  className="shrink-0 px-4 py-2 bg-gradient-to-r from-natural-sidebar/5 to-transparent border-r-4 border-natural-accent rounded-l-xl text-xs font-black text-natural-sidebar shadow-sm animate-in fade-in zoom-in"
+                                  style={{ animationDelay: `${idx * 150}ms` }}
+                                >
+                                  {title}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          
+                          {courses.length > 0 && (
+                            <div className="flex items-center gap-2 pt-2 border-t border-natural-sidebar/5">
+                              <span className="shrink-0 text-[10px] font-black text-natural-secondary px-2 italic">قائمة النظام:</span>
+                              <div className="flex flex-wrap gap-2">
+                                {courses.map(c => (
+                                  <button 
+                                    key={c.id}
+                                    onClick={() => setSelectedAccountingCourseId(c.id)}
+                                    className="px-3 py-1 bg-white border border-natural-border rounded-xl text-[10px] font-bold text-natural-sidebar shadow-sm hover:border-natural-accent hover:text-natural-accent transition-all"
+                                  >
+                                    {c.title}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {!selectedAccountingCourseId ? (
+                  <div className="space-y-6">
+                    {/* Visual Charts Section */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" dir="rtl">
+                      <div className="bg-white p-6 rounded-[2rem] border-2 border-natural-sidebar/5 shadow-xl shadow-natural-sidebar/5">
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="font-black text-natural-sidebar flex items-center gap-2">
+                            <Icons.BarChart3 size={20} className="text-natural-accent" />
+                            مقارنة الدخل والتكاليف
+                          </h3>
+                        </div>
+                        <div className="h-72 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={courses.map(c => {
+                                const ct = trainees.filter(t => t.courseId === c.id || t.courseId === c.title);
+                                const traineeInc = ct.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+                                const extraInc = parseFloat(c.extraIncome || '0') || 0;
+                                const baseCost = parseFloat(c.cost || '0') || 0;
+                                const extraExp = parseFloat(c.extraExpenses || '0') || 0;
+                                return {
+                                  name: c.title,
+                                  الدخل: traineeInc + extraInc,
+                                  التكاليف: baseCost + extraExp
+                                };
+                              })}
+                              margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                              <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 'bold' }} />
+                              <YAxis tick={{ fontSize: 10 }} />
+                              <Tooltip 
+                                contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                itemStyle={{ fontWeight: 'bold' }}
+                              />
+                              <Legend verticalAlign="top" height={36}/>
+                              <Bar dataKey="الدخل" fill="#1E293B" radius={[4, 4, 0, 0]} />
+                              <Bar dataKey="التكاليف" fill="#FFC107" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-6 rounded-[2rem] border-2 border-natural-sidebar/5 shadow-xl shadow-natural-sidebar/5">
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="font-black text-natural-sidebar flex items-center gap-2">
+                            <Icons.Activity size={20} className="text-green-600" />
+                            توزيع صافي الأرباح
+                          </h3>
+                        </div>
+                        <div className="h-72 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={courses.map(c => {
+                                  const ct = trainees.filter(t => t.courseId === c.id || t.courseId === c.title);
+                                  const income = ct.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0) + (parseFloat(c.extraIncome || '0') || 0);
+                                  const cost = (parseFloat(c.cost || '0') || 0) + (parseFloat(c.extraExpenses || '0') || 0);
+                                  return { name: c.title, value: Math.max(0, income - cost) };
+                                }).filter(d => d.value > 0)}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={80}
+                                paddingAngle={5}
+                                dataKey="value"
+                              >
+                                {courses.map((_, index) => (
+                                  <Cell key={`cell-${index}`} fill={[ '#1E293B', '#FFC107', '#10B981', '#F59E0B', '#3B82F6' ][index % 5]} />
+                                ))}
+                              </Pie>
+                              <Tooltip 
+                                contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                              />
+                              <Legend layout="vertical" align="right" verticalAlign="middle" />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Table Statistics Row */}
+                    <div className="bg-white rounded-[2rem] border-2 border-natural-sidebar/5 overflow-hidden shadow-xl shadow-natural-sidebar/5" dir="rtl">
+                    <div className="p-6 border-b border-natural-sidebar/5 bg-natural-bg/10 flex items-center justify-between">
+                      <h3 className="font-black text-natural-sidebar flex items-center gap-2">
+                        <Icons.PieChart size={20} className="text-natural-accent" />
+                        إحصائيات الدورات والتحصيل
+                      </h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-right border-collapse">
+                        <thead>
+                          <tr className="bg-natural-bg/50 text-natural-sidebar">
+                            <th className="p-5 text-xs font-black border-l border-natural-sidebar/5">الدورة والمدربة</th>
+                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">التاريخ والمدة</th>
+                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">المشتركين</th>
+                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">السعر</th>
+                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">الإجمالي</th>
+                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">الخصم</th>
+                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">الصافي النهائي</th>
+                            <th className="p-5 text-xs font-black text-center">الإجراء</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-natural-sidebar/5">
+                          {courses.map(course => {
+                            const ct = trainees.filter(t => t.courseId === course.id || t.courseId === course.title);
+                            const traineeIncome = ct.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+                            const extraIncomeVal = parseFloat(course.extraIncome || '0') || 0;
+                            const finalIncome = traineeIncome + extraIncomeVal;
+                            
+                            const courseBasePrice = parseFloat(course.price || '0') || 0;
+                            const potentialTotal = ct.length * courseBasePrice;
+                            const totalDiscount = potentialTotal - finalIncome;
+                            const capacity = course.capacity || 20;
+                            const progress = Math.min(100, (ct.length / capacity) * 100);
+                            
+                            return (
+                              <tr key={course.id} className="hover:bg-natural-bg/30 transition-colors group">
+                                <td className="p-5">
+                                  <div className="flex flex-col">
+                                    <span className="font-black text-natural-sidebar text-sm">{course.title}</span>
+                                    <span className="text-[10px] font-bold text-natural-accent">المدربة: {course.instructor}</span>
+                                  </div>
+                                </td>
+                                <td className="p-5 text-center">
+                                  <div className="flex flex-col gap-1 items-center">
+                                    <div className="flex items-center gap-1 text-[10px] font-bold text-natural-sidebar">
+                                      <Icons.Calendar size={10} />
+                                      {course.startDate}
+                                    </div>
+                                    <span className="text-[9px] bg-natural-sidebar/5 px-2 py-0.5 rounded-full text-natural-secondary">
+                                      {course.duration || 'غير محدد'}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="p-5 text-center">
+                                  <div className="flex flex-col items-center">
+                                    <span className="font-black text-natural-sidebar">{ct.length}</span>
+                                    <div className="w-16 h-1 bg-natural-bg rounded-full mt-1 overflow-hidden">
+                                      <div className="h-full bg-natural-accent" style={{ width: `${progress}%` }} />
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="p-5 text-center font-bold text-natural-secondary text-xs">
+                                  {courseBasePrice.toLocaleString()} ر.س
+                                </td>
+                                <td className="p-5 text-center font-bold text-natural-sidebar text-xs">
+                                  {potentialTotal.toLocaleString()}
+                                </td>
+                                <td className="p-5 text-center font-bold text-red-400 text-xs">
+                                  {totalDiscount > 0 ? `-${totalDiscount.toLocaleString()}` : '0'}
+                                </td>
+                                <td className="p-5 text-center">
+                                  <div className="flex flex-col items-center">
+                                    <span className="font-black text-green-600 bg-green-50 px-3 py-1 rounded-lg border border-green-100">
+                                      {finalIncome.toLocaleString()} ر.س
+                                    </span>
+                                    {course.isSettled && (
+                                      <span className="text-[8px] font-black bg-green-600 text-white px-1.5 rounded-full mt-1">تمت التسوية</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="p-5 text-center">
+                                  <button 
+                                    onClick={() => setSelectedAccountingCourseId(course.id)}
+                                    className="p-2.5 bg-white border-2 border-natural-border text-natural-sidebar rounded-xl hover:bg-natural-sidebar hover:text-white hover:border-natural-sidebar transition-all shadow-sm group/btn"
+                                  >
+                                    <Icons.FileText size={18} className="group-hover/btn:scale-110 transition-transform" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                  <div className="space-y-6" dir="rtl">
+                    {(() => {
+                      const course = courses.find(c => c.id === selectedAccountingCourseId);
+                      if (!course) return null;
+                      
+                      // Group trainees by duration (e.g., "أسبوع", "يوم")
+                      const traineesByDuration = trainees
+                        .filter(t => t.courseId === course.id || t.courseId === course.title)
+                        .reduce((acc, t) => {
+                          const dur = t.duration || 'غير محدد';
+                          if (!acc[dur]) acc[dur] = [];
+                          acc[dur].push(t);
+                          return acc;
+                        }, {} as Record<string, Trainee[]>);
+
+                      const totalTraineesCount = Object.values(traineesByDuration).reduce<number>((sum, list: Trainee[]) => sum + list.length, 0);
+                      const traineeIncome = Object.values(traineesByDuration).reduce<number>((sum, list: Trainee[]) => 
+                        sum + list.reduce((s, t) => s + (parseFloat(t.amount) || 0), 0), 0);
+                      const extraIncome = parseFloat(course.extraIncome || '0') || 0;
+                      const totalIncome = traineeIncome + extraIncome;
+                      
+                      const baseCost = parseFloat(course.cost || '0') || 0;
+                      const extraExpenses = parseFloat(course.extraExpenses || '0') || 0;
+                      const totalExpenses = baseCost + extraExpenses;
+                      
+                      const associationPercentage = parseFloat(course.associationPercentage || '30') || 0;
+                      const teacherPercentage = 100 - associationPercentage;
+                      
+                      const netProfit = totalIncome - totalExpenses;
+                      const associationShare = netProfit > 0 ? (netProfit * associationPercentage) / 100 : 0;
+                      const teacherShare = netProfit > 0 ? (netProfit * teacherPercentage) / 100 : 0;
+
+                      return (
+                        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                          {/* Header */}
+                          <div className="flex flex-col md:flex-row items-center justify-between pb-6 border-b-2 border-natural-sidebar/10 gap-4">
+                            <div className="flex items-center gap-4">
+                              <button 
+                                onClick={() => setSelectedAccountingCourseId(null)}
+                                className="h-12 w-12 rounded-2xl bg-white border border-natural-border flex items-center justify-center text-natural-sidebar hover:bg-natural-bg hover:scale-110 transition-all shadow-sm"
+                              >
+                                <Icons.ArrowRight size={24} />
+                              </button>
+                              <div className="text-right">
+                                <h2 className="text-2xl font-black text-natural-sidebar">{course.title}</h2>
+                                <p className="text-base font-bold text-natural-sidebar/70">
+                                  برنامج {course.title} مع المدربة ({course.instructor}) من تاريخ {course.startDate} إلى {course.endDate}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex gap-3">
+                              <button 
+                                onClick={() => window.print()}
+                                className="flex items-center gap-2 px-6 py-3 bg-natural-sidebar text-white rounded-2xl text-sm font-bold hover:bg-opacity-90 transition-all shadow-lg shadow-natural-sidebar/20"
+                              >
+                                <Icons.Printer size={18} />
+                                طباعة التقرير
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col xl:flex-row gap-8 items-start">
+                            {/* Detailed Participation Table */}
+                            <div className="flex-1 w-full">
+                              <div className="bg-white rounded-[2rem] border-2 border-natural-sidebar/5 overflow-hidden shadow-xl shadow-natural-sidebar/5">
+                                <table className="w-full text-right border-collapse">
+                                  <thead>
+                                    <tr className="bg-[#FFE57F] text-natural-sidebar">
+                                      <th className="p-5 text-sm font-black border-l border-natural-sidebar/10">المدة</th>
+                                      <th className="p-5 text-sm font-black text-center border-l border-natural-sidebar/10">العدد</th>
+                                      <th className="p-5 text-sm font-black text-center border-l border-natural-sidebar/10">السعر</th>
+                                      <th className="p-5 text-sm font-black text-center border-l border-natural-sidebar/10">الإجمالي</th>
+                                      <th className="p-5 text-sm font-black text-center border-l border-natural-sidebar/10">الخصم</th>
+                                      <th className="p-5 text-sm font-black text-center">الإجمالي النهائي</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-natural-sidebar/5">
+                                    {Object.entries(traineesByDuration).map(([duration, list]: [string, Trainee[]]) => {
+                                      const durationIncome = list.reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+                                      const defaultPrice = parseFloat(course.price) || 0;
+                                      const potentialIncome = list.length * defaultPrice;
+                                      const totalDiscounts = potentialIncome - durationIncome;
+
+                                      return (
+                                        <tr key={duration} className="hover:bg-natural-bg/30 transition-colors">
+                                          <td className="p-5 font-bold text-natural-sidebar border-l border-natural-sidebar/5">{duration}</td>
+                                          <td className="p-5 text-center font-bold border-l border-natural-sidebar/5">{list.length}</td>
+                                          <td className="p-5 text-center font-bold border-l border-natural-sidebar/5">{defaultPrice.toLocaleString()}</td>
+                                          <td className="p-5 text-center font-bold border-l border-natural-sidebar/5">{potentialIncome.toLocaleString()}</td>
+                                          <td className="p-5 text-center font-bold text-red-500 border-l border-natural-sidebar/5">{totalDiscounts > 0 ? totalDiscounts.toLocaleString() : '0'}</td>
+                                          <td className="p-5 text-center font-black text-natural-accent">{durationIncome.toLocaleString()}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                    <tr className="bg-natural-bg/40 font-black text-natural-sidebar border-t-2 border-natural-sidebar/10">
+                                      <td className="p-5 border-l border-natural-sidebar/5">المجموع</td>
+                                      <td className="p-5 text-center border-l border-natural-sidebar/5">{totalTraineesCount}</td>
+                                      <td className="p-5 text-center border-l border-natural-sidebar/5">-</td>
+                                      <td className="p-5 text-center border-l border-natural-sidebar/5">-</td>
+                                      <td className="p-5 text-center border-l border-natural-sidebar/5">-</td>
+                                      <td className="p-5 text-center bg-[#FFE57F]/30">{totalIncome.toLocaleString()}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            {/* Financial Summary Sidebar */}
+                            <div className="w-full xl:w-96 shrink-0">
+                              <div className="bg-white rounded-[2rem] border-2 border-natural-sidebar/10 overflow-hidden shadow-2xl shadow-natural-sidebar/10">
+                                <div className="bg-[#FFE57F] p-4 text-center border-b border-natural-sidebar/10">
+                                  <h4 className="font-black text-natural-sidebar">ملخص الحسابات</h4>
+                                </div>
+                                <div className="divide-y divide-natural-sidebar/5 text-right">
+                                  <div className="p-4 flex justify-between items-center bg-gray-50/50">
+                                    <div className="flex flex-col">
+                                      <span className="font-bold text-natural-secondary">المصاريف الأساسية</span>
+                                      <span className="text-[9px] text-natural-sidebar/50 italic">إيجار، مواد، الخ...</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <input 
+                                        type="number"
+                                        defaultValue={baseCost}
+                                        onBlur={(e) => handleUpdateCourseFinancials(course.id, { cost: e.target.value })}
+                                        className="w-20 p-1 text-center font-black text-black bg-white border border-natural-border rounded-lg outline-none focus:border-natural-accent"
+                                      />
+                                      <span className="text-[10px] font-bold">ر.س</span>
+                                    </div>
+                                  </div>
+                                  <div className="p-4 flex justify-between items-center bg-red-50/30">
+                                    <span className="font-bold text-red-600">مصاريف إضافية</span>
+                                    <div className="flex items-center gap-2">
+                                      <input 
+                                        type="number"
+                                        defaultValue={extraExpenses}
+                                        onBlur={(e) => handleUpdateCourseFinancials(course.id, { extraExpenses: e.target.value })}
+                                        className="w-20 p-1 text-center font-black text-red-600 bg-white border border-red-200 rounded-lg outline-none focus:border-red-400"
+                                      />
+                                      <span className="text-[10px] font-bold">ر.س</span>
+                                    </div>
+                                  </div>
+                                  <div className="p-4 flex justify-between items-center bg-gray-100/50">
+                                    <span className="font-black text-natural-sidebar">إجمالي التكاليف</span>
+                                    <span className="font-black text-black text-lg">{totalExpenses.toLocaleString()} ر.س</span>
+                                  </div>
+                                  <div className="p-4 flex justify-between items-center bg-natural-accent/5">
+                                    <div className="flex flex-col">
+                                      <span className="font-bold text-natural-sidebar">دخل إضافي</span>
+                                      <span className="text-[9px] text-natural-secondary italic">رعاية، مبيعات، أخرى</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <input 
+                                        type="number"
+                                        defaultValue={extraIncome}
+                                        onBlur={(e) => handleUpdateCourseFinancials(course.id, { extraIncome: e.target.value })}
+                                        className="w-20 p-1 text-center font-black text-natural-accent bg-white border border-natural-accent/20 rounded-lg outline-none focus:border-natural-accent"
+                                      />
+                                      <span className="text-[10px] font-bold">ر.س</span>
+                                    </div>
+                                  </div>
+                                  <div className="p-4 flex justify-between items-center bg-[#FFE57F]/10">
+                                    <span className="font-black text-natural-sidebar">إجمالي الدخل</span>
+                                    <span className="font-black text-natural-sidebar text-lg">{totalIncome.toLocaleString()}</span>
+                                  </div>
+                                  <div className="p-4 flex justify-between items-center">
+                                    <span className="font-black text-natural-sidebar">صافي الربح</span>
+                                    <span className="font-black text-natural-success text-xl">{netProfit.toLocaleString()}</span>
+                                  </div>
+                                  <div className="p-4 flex justify-between items-center text-right border-t-2 border-dashed border-natural-sidebar/10">
+                                    <span className="font-bold text-natural-secondary">النسبة للمدربة</span>
+                                    <div className="flex items-center gap-2">
+                                      <input 
+                                        type="number"
+                                        defaultValue={teacherPercentage}
+                                        onBlur={(e) => {
+                                          const val = parseFloat(e.target.value) || 0;
+                                          handleUpdateCourseFinancials(course.id, { associationPercentage: (100 - val).toString() });
+                                        }}
+                                        className="w-16 p-1 text-center font-black text-natural-sidebar bg-natural-sidebar/5 rounded-lg border border-transparent focus:border-natural-accent outline-none"
+                                      />
+                                      <span className="text-[10px] font-bold">%</span>
+                                    </div>
+                                  </div>
+                                  <div className="p-4 flex justify-between items-center text-right">
+                                    <span className="font-bold text-natural-secondary">النسبة للجمعية</span>
+                                    <span className="font-black text-natural-sidebar text-base bg-natural-sidebar/5 px-3 py-1 rounded-lg">{associationPercentage}%</span>
+                                  </div>
+                                  <div className="p-5 space-y-4 bg-natural-bg/30">
+                                    <div className="bg-white p-4 rounded-2xl border border-natural-sidebar/10 shadow-sm flex justify-between items-center transition-all hover:scale-105">
+                                      <div className="flex flex-col text-right">
+                                        <span className="text-[10px] font-black text-natural-secondary uppercase mb-1">المبلغ المستحق للمدربة</span>
+                                        <span className="font-black text-natural-sidebar text-2xl">{teacherShare.toLocaleString()} ر.س</span>
+                                      </div>
+                                      <div className="p-2 bg-natural-sidebar/10 rounded-xl text-natural-sidebar">
+                                        <Icons.User size={24} />
+                                      </div>
+                                    </div>
+                                    <div className="bg-white p-4 rounded-2xl border border-natural-accent/10 shadow-sm flex justify-between items-center transition-all hover:scale-105">
+                                      <div className="flex flex-col text-right">
+                                        <span className="text-[10px] font-black text-natural-secondary uppercase mb-1">المبلغ المستحق للجمعية</span>
+                                        <span className="font-black text-natural-accent text-2xl">{associationShare.toLocaleString()} ر.س</span>
+                                      </div>
+                                      <div className="p-2 bg-natural-accent/10 rounded-xl text-natural-accent">
+                                        <Icons.Home size={24} />
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="p-6 bg-white">
+                                    {course.isSettled ? (
+                                      <div className="w-full py-4 bg-green-50 text-green-600 rounded-2xl font-black flex items-center justify-center gap-3 border-2 border-green-200">
+                                        <Icons.CheckCircle size={20} />
+                                        تمت التسوية بنجاح
+                                      </div>
+                                    ) : (
+                                      <button 
+                                        onClick={() => handleSettleCourse(course.id)}
+                                        className="w-full py-4 bg-natural-sidebar text-white rounded-2xl font-black shadow-lg shadow-natural-sidebar/20 hover:bg-natural-accent hover:shadow-natural-accent/20 transition-all flex items-center justify-center gap-3"
+                                      >
+                                        <Icons.CheckCircle size={20} />
+                                        تأكيد الدفع / تسوية الحساب
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </motion.div>
             )}
 
@@ -1755,7 +2798,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {view.startsWith('attendance') && (
+            {(view === 'attendance' || view.startsWith('attendance')) && (
               <motion.div
                 key={view}
                 initial={{ opacity: 0, x: 20 }}
@@ -1763,10 +2806,22 @@ export default function App() {
                 exit={{ opacity: 0, x: -20 }}
                 className="bg-white rounded-2xl shadow-sm border border-natural-border overflow-hidden"
               >
-                <div className="p-6 border-b border-natural-border bg-natural-bg/30 flex justify-between items-center">
+                <div className="p-6 border-b border-natural-border bg-natural-bg/30 flex flex-col md:flex-row justify-between items-center gap-4">
                   <div>
                     <h3 className="font-bold text-lg text-natural-sidebar">قائمة تسجيل الحضور</h3>
                     <p className="text-xs text-natural-secondary mt-1">سجل حضور المشتركين لليوم: {new Date().toLocaleDateString('en-CA')}</p>
+                  </div>
+                  <div className="flex items-center gap-4 w-full md:w-auto">
+                    <AddTeacherInput 
+                      value={newTeacherInput}
+                      onChange={setNewTeacherInput}
+                      onAdd={(name: string) => {
+                        if (!settings.teachers?.includes(name)) {
+                          const updatedTeachers = [...(settings.teachers || []), name];
+                          updateSettings({ ...settings, teachers: updatedTeachers });
+                        }
+                      }}
+                    />
                   </div>
                 </div>
                 <div className="divide-y divide-natural-bg">
@@ -1935,7 +2990,23 @@ export default function App() {
 
             {view.startsWith('members') && (
               <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-6 bg-white rounded-3xl border border-natural-border shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                  <div>
+                    <h3 className="font-bold text-lg text-natural-sidebar">إدارة المشتركين</h3>
+                    <p className="text-xs text-natural-secondary mt-1">عرض إحصائيات المشتركين وإضافة معلمين جدد للنظام</p>
+                  </div>
+                  <AddTeacherInput 
+                    value={newTeacherInput}
+                    onChange={setNewTeacherInput}
+                    onAdd={(name: string) => {
+                      if (!settings.teachers?.includes(name)) {
+                        const updatedTeachers = [...(settings.teachers || []), name];
+                        updateSettings({ ...settings, teachers: updatedTeachers });
+                      }
+                    }}
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <StatCard 
                     label="عدد المشتركين" 
                     value={filteredMembers.length} 
@@ -2593,48 +3664,88 @@ export default function App() {
                   </div>
 
                   <div className="p-8 space-y-6">
-                    <div className="space-y-4">
-                      <div className="relative">
-                        <input 
-                          type="password" 
-                          placeholder="كلمة المرور"
-                          className={`w-full px-5 py-4 bg-natural-bg border ${passwordError ? 'border-red-500 shadow-[0_0_0_1px_rgba(239,68,68,0.5)]' : 'border-natural-border focus:border-natural-accent'} rounded-2xl outline-none text-center font-bold tracking-[0.5em] transition-all`}
-                          value={passwordInput}
-                          onChange={e => {
-                            setPasswordInput(e.target.value);
-                            setPasswordError(false);
+                    {isResettingPassword ? (
+                      <div className="space-y-4">
+                        <div className="relative">
+                          <input 
+                            type="text" 
+                            placeholder="كلمة المرور الجديدة"
+                            className="w-full px-5 py-4 bg-natural-bg border border-natural-border focus:border-natural-accent rounded-2xl outline-none text-center font-bold transition-all"
+                            value={newPasswordInput}
+                            onChange={e => setNewPasswordInput(e.target.value)}
+                          />
+                        </div>
+                        <button 
+                          onClick={handleResetPassword}
+                          className="w-full bg-natural-accent text-white py-4 rounded-2xl font-bold hover:bg-opacity-90 transition-all shadow-xl shadow-natural-accent/20"
+                        >
+                          تعيين كلمة المرور
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setIsResettingPassword(false);
+                            setNewPasswordInput('');
                           }}
-                          onKeyDown={e => e.key === 'Enter' && verifyPassword()}
-                          autoFocus
-                        />
-                        {passwordError && (
-                          <motion.p 
-                            initial={{ opacity: 0, y: -10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="text-red-500 text-[10px] text-center mt-2 font-bold"
-                          >
-                            كلمة المرور غير صحيحة، حاول مرة أخرى
-                          </motion.p>
-                        )}
+                          className="w-full text-natural-secondary py-2 text-sm font-bold hover:text-natural-sidebar transition-colors"
+                        >
+                          رجوع
+                        </button>
                       </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="relative">
+                          <input 
+                            type="password" 
+                            placeholder="كلمة المرور"
+                            className={`w-full px-5 py-4 bg-natural-bg border ${passwordError ? 'border-red-500 shadow-[0_0_0_1px_rgba(239,68,68,0.5)]' : 'border-natural-border focus:border-natural-accent'} rounded-2xl outline-none text-center font-bold tracking-[0.5em] transition-all`}
+                            value={passwordInput}
+                            onChange={e => {
+                              setPasswordInput(e.target.value);
+                              setPasswordError(false);
+                            }}
+                            onKeyDown={e => e.key === 'Enter' && verifyPassword()}
+                            autoFocus
+                          />
+                          {passwordError && (
+                            <motion.p 
+                              initial={{ opacity: 0, y: -10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="text-red-500 text-[10px] text-center mt-2 font-bold"
+                            >
+                              كلمة المرور غير صحيحة، حاول مرة أخرى
+                            </motion.p>
+                          )}
+                        </div>
 
-                      <button 
-                        onClick={verifyPassword}
-                        className="w-full bg-natural-sidebar text-white py-4 rounded-2xl font-bold hover:bg-natural-accent transition-all shadow-xl shadow-natural-sidebar/20"
-                      >
-                        دخول
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setIsPasswordModalOpen(false);
-                          setPasswordInput('');
-                          setPasswordError(false);
-                        }}
-                        className="w-full text-natural-secondary py-2 text-sm font-bold hover:text-natural-sidebar transition-colors"
-                      >
-                        إلغاء
-                      </button>
-                    </div>
+                        <button 
+                          onClick={verifyPassword}
+                          className="w-full bg-natural-sidebar text-white py-4 rounded-2xl font-bold hover:bg-natural-accent transition-all shadow-xl shadow-natural-sidebar/20"
+                        >
+                          دخول
+                        </button>
+                        
+                        <div className="flex flex-col gap-2">
+                          <button 
+                            onClick={() => setIsResettingPassword(true)}
+                            className="w-full text-natural-accent py-2 text-xs font-bold hover:underline transition-all"
+                          >
+                            نسيت كلمة المرور؟ تعيين كلمة مرور جديدة
+                          </button>
+                          
+                          <button 
+                            onClick={() => {
+                              setIsPasswordModalOpen(false);
+                              setPasswordInput('');
+                              setPasswordError(false);
+                              setIsResettingPassword(false);
+                            }}
+                            className="w-full text-natural-secondary py-2 text-sm font-bold hover:text-natural-sidebar transition-colors"
+                          >
+                            إلغاء
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               </div>
@@ -2717,7 +3828,7 @@ export default function App() {
   );
 }
 
-function AccountantView({ members, trainees, settings, setSettings, showTotalAmount, setIsPasswordModalOpen }: any) {
+function AccountantView({ members, trainees, settings, setSettings, showTotalAmount, setIsPasswordModalOpen, teacherAttendance, markTeacherAttendance, deleteTeacherAttendance }: any) {
   const [financials, setFinancials] = useState<Record<string, { base?: number, percentage: number, extra: number }>>({});
   const [calcDisplay, setCalcDisplay] = useState('0');
   const [calcExpression, setCalcExpression] = useState('');
@@ -2738,9 +3849,18 @@ function AccountantView({ members, trainees, settings, setSettings, showTotalAmo
     return (baseToUse * (config.percentage / 100)) + Number(config.extra);
   };
 
+  const calculateAssocProfit = (teacher: string) => {
+    const teacherMembers = members.filter((m: any) => m.teacherName === teacher);
+    const total = teacherMembers.reduce((acc: number, curr: any) => acc + (Number(curr.price) || 0), 0);
+    const config = financials[teacher] || { base: total, percentage: 0, extra: 0 };
+    const baseToUse = config.base !== undefined ? config.base : total;
+    const teacherProfit = (baseToUse * (config.percentage / 100)) + Number(config.extra);
+    return baseToUse - teacherProfit;
+  };
+
   const totalTeacherProfits = teachers.reduce((acc: number, t: string) => acc + calculateTeacherProfit(t), 0);
   const totalExpected = members.reduce((acc: number, curr: any) => acc + (Number(curr.price) || 0), 0);
-  const totalAssocProfit = totalExpected - totalTeacherProfits;
+  const totalAssocProfit = teachers.reduce((acc: number, t: string) => acc + calculateAssocProfit(t), 0);
 
   const quickCalcResult = (Number(calcBase) * (Number(calcPct) / 100)) + Number(calcFixed);
 
@@ -2924,14 +4044,23 @@ function AccountantView({ members, trainees, settings, setSettings, showTotalAmo
 
 
       <div className="bg-white rounded-3xl border border-natural-border overflow-hidden shadow-sm">
-        <div className="p-6 border-b border-natural-border bg-natural-bg/30">
-          <h3 className="font-bold text-lg text-natural-sidebar">تحليل المبالغ حسب المعلمين</h3>
+        <div className="p-6 border-b border-natural-border bg-natural-bg/30 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div>
+            <h3 className="font-bold text-lg text-natural-sidebar">تقرير المحاسبة المالية</h3>
+            <p className="text-xs text-natural-secondary mt-1">توزيع النسب والمستحقات المالية للمعلمين والجمعية</p>
+          </div>
+          <AddTeacherInput 
+            value={newTeacherName}
+            onChange={setNewTeacherName}
+            onAdd={handleAddTeacher}
+          />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-right">
             <thead className="bg-natural-bg/50 border-b border-natural-border">
               <tr>
                 <th className="p-4 text-xs font-bold text-natural-sidebar">المعلم/ة</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar text-center">التحضير</th>
                 <th className="p-4 text-xs font-bold text-natural-sidebar text-center">طلاب</th>
                 <th className="p-4 text-xs font-bold text-natural-sidebar text-center">إجمالي النظام</th>
                 <th className="p-4 text-xs font-bold text-natural-sidebar">المبلغ الأساسي</th>
@@ -2948,7 +4077,7 @@ function AccountantView({ members, trainees, settings, setSettings, showTotalAmo
                 
                 const baseToUse = config.base !== undefined ? config.base : total;
                 const teacherProfit = (baseToUse * (config.percentage / 100)) + Number(config.extra);
-                const assocProfit = total - teacherProfit;
+                const assocProfit = baseToUse - teacherProfit;
 
                 return (
                   <tr key={teacher} className="hover:bg-natural-bg/20 transition-colors">
@@ -2961,15 +4090,53 @@ function AccountantView({ members, trainees, settings, setSettings, showTotalAmo
                           <span className="font-bold text-natural-sidebar text-sm">{teacher}</span>
                         </div>
                         <button 
-                          onClick={() => {
-                            const updatedTeachers = (settings.teachers || []).filter((t: string) => t !== teacher);
-                            setSettings({ ...settings, teachers: updatedTeachers });
+                          onClick={async () => {
+                            if (confirm(`هل أنت متأكد من حذف المعلم/ة ${teacher}؟`)) {
+                              const updatedTeachers = (settings.teachers || []).filter((t: string) => t !== teacher);
+                              setSettings({ ...settings, teachers: updatedTeachers });
+                              await updateDoc(doc(db, 'settings', 'global'), { teachers: updatedTeachers });
+                            }
                           }}
                           className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
                           title="حذف"
                         >
                           <Trash2 size={14} />
                         </button>
+                      </div>
+                    </td>
+                    <td className="p-4 text-center">
+                      <div className="flex flex-col items-center justify-center gap-1">
+                        <div className="flex items-center justify-center gap-1">
+                          <button 
+                            onClick={() => markTeacherAttendance(teacher, 'حاضر')}
+                            className={`w-6 h-6 rounded flex items-center justify-center transition-all ${teacherAttendance.find((a: any) => a.teacherName === teacher && a.date === new Date().toISOString().split('T')[0])?.status === 'حاضر' ? 'bg-green-500 text-white' : 'bg-natural-bg text-natural-secondary hover:bg-green-100'}`}
+                            title="حاضر"
+                          >
+                            <Check size={12} />
+                          </button>
+                          <button 
+                            onClick={() => markTeacherAttendance(teacher, 'غائب')}
+                            className={`w-6 h-6 rounded flex items-center justify-center transition-all ${teacherAttendance.find((a: any) => a.teacherName === teacher && a.date === new Date().toISOString().split('T')[0])?.status === 'غائب' ? 'bg-red-500 text-white' : 'bg-natural-bg text-natural-secondary hover:bg-red-100'}`}
+                            title="غائب"
+                          >
+                            <X size={12} />
+                          </button>
+                          <button 
+                            onClick={() => markTeacherAttendance(teacher, 'غائب بي تعويض')}
+                            className={`w-6 h-6 rounded flex items-center justify-center transition-all ${teacherAttendance.find((a: any) => a.teacherName === teacher && a.date === new Date().toISOString().split('T')[0])?.status === 'غائب بي تعويض' ? 'bg-amber-500 text-white' : 'bg-natural-bg text-natural-secondary hover:bg-amber-100'}`}
+                            title="غائب بي تعويض"
+                          >
+                            <RefreshCw size={12} />
+                          </button>
+                        </div>
+                        {teacherAttendance.find((a: any) => a.teacherName === teacher && a.date === new Date().toISOString().split('T')[0]) && (
+                          <button 
+                            onClick={() => deleteTeacherAttendance(teacher)}
+                            className="text-[8px] text-red-400 hover:text-red-600 font-bold"
+                          >
+                            حذف
+                          </button>
+                        )}
                       </div>
                     </td>
                     <td className="p-4 text-center">
@@ -3013,32 +4180,6 @@ function AccountantView({ members, trainees, settings, setSettings, showTotalAmo
                   </tr>
                 );
               })}
-              <tr className="bg-natural-bg/10">
-                <td className="p-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 bg-natural-accent/20 rounded-lg flex items-center justify-center text-natural-accent">
-                      <Plus size={16} />
-                    </div>
-                    <input 
-                      type="text"
-                      placeholder="اسم المعلم/ة الجديد..."
-                      value={newTeacherName}
-                      onChange={e => setNewTeacherName(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleAddTeacher()}
-                      className="flex-1 bg-white p-2 rounded-lg border border-natural-border focus:border-natural-accent outline-none text-xs font-bold"
-                    />
-                  </div>
-                </td>
-                <td colSpan={6} className="p-4">
-                  <button 
-                    onClick={handleAddTeacher}
-                    disabled={!newTeacherName.trim()}
-                    className="px-4 py-2 bg-natural-accent text-white rounded-xl text-xs font-bold hover:bg-opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    إضافة المعلم/ة للجدول
-                  </button>
-                </td>
-              </tr>
             </tbody>
             <tfoot className="bg-natural-sidebar text-white shadow-[0_-4px_10px_rgba(0,0,0,0.1)]">
               <tr>
@@ -3089,6 +4230,37 @@ function StatCard({ label, value, icon: Icon, color, onClick }: any) {
   );
 }
 
+function AddTeacherInput({ value, onChange, onAdd }: any) {
+  const handleAdd = () => {
+    if (value.trim()) {
+      onAdd(value.trim());
+      onChange('');
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="relative flex-1 md:w-64">
+        <input 
+          type="text" 
+          placeholder="إضافة معلم/ة جديد..." 
+          className="w-full text-xs p-2.5 pr-9 border border-natural-border rounded-xl focus:ring-1 focus:ring-natural-accent outline-none"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+        />
+        <Icons.UserPlus size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-natural-secondary" />
+      </div>
+      <button 
+        onClick={handleAdd}
+        className="bg-natural-accent text-white px-4 py-2.5 rounded-xl hover:bg-opacity-90 transition-all font-bold text-xs shadow-sm hover:shadow-md active:scale-95"
+      >
+        إضافة
+      </button>
+    </div>
+  );
+}
+
 function SectionCard({ title, children, badge, icon: Icon }: any) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-natural-border overflow-hidden">
@@ -3107,5 +4279,172 @@ function SectionCard({ title, children, badge, icon: Icon }: any) {
         {children}
       </div>
     </div>
+  );
+}
+
+function TeacherAttendanceView({ teachers, attendance, markAttendance, deleteAttendance, onAddTeacher }: any) {
+  const today = new Date().toISOString().split('T')[0];
+  const formattedDate = new Date().toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const [newTeacherInputLocal, setNewTeacherInputLocal] = useState('');
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
+      <div className="bg-white rounded-3xl border border-natural-border overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-natural-border bg-natural-bg/30 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div>
+            <h3 className="font-bold text-lg text-natural-sidebar">تحضير المعلمين</h3>
+            <p className="text-xs text-natural-secondary mt-1">{formattedDate}</p>
+          </div>
+          <div className="flex items-center gap-4 w-full md:w-auto">
+            <AddTeacherInput 
+              value={newTeacherInputLocal}
+              onChange={setNewTeacherInputLocal}
+              onAdd={onAddTeacher}
+            />
+            <div className="bg-natural-accent/10 px-4 py-3 rounded-2xl hidden lg:block">
+              <span className="text-natural-accent font-bold text-xs">اليوم: {new Date().toLocaleDateString('ar-SA', { weekday: 'long' })}</span>
+            </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-right" dir="rtl">
+            <thead className="bg-natural-bg/50 border-b border-natural-border">
+              <tr>
+                <th className="p-4 text-xs font-bold text-natural-sidebar">المعلم/ة</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar text-center">الحالة الحالية</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar text-center">الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-natural-bg">
+              {teachers.map((teacher: string) => {
+                const record = attendance.find((a: any) => a.teacherName === teacher && a.date === today);
+                const status = record?.status;
+
+                const getStatusColor = (s: string) => {
+                  switch(s) {
+                    case 'حاضر': return 'bg-green-100 text-green-600 border-green-200';
+                    case 'غائب': return 'bg-red-100 text-red-600 border-red-200';
+                    case 'غائب بي تعويض': return 'bg-amber-100 text-amber-600 border-amber-200';
+                    default: return 'bg-gray-100 text-gray-400 border-gray-200';
+                  }
+                };
+
+                return (
+                  <tr key={teacher} className="hover:bg-natural-bg/20 transition-colors">
+                    <td className="p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-natural-accent/10 rounded-xl flex items-center justify-center text-natural-accent">
+                          <Icons.User size={20} />
+                        </div>
+                        <span className="font-bold text-natural-sidebar text-md">{teacher}</span>
+                      </div>
+                    </td>
+                    <td className="p-4 text-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <div className={`inline-flex items-center px-4 py-1.5 rounded-full border text-xs font-bold ${getStatusColor(status || '')}`}>
+                          {status || 'لم يتم التحضير'}
+                        </div>
+                        {status && (
+                          <button
+                            onClick={() => deleteAttendance(teacher)}
+                            className="text-[10px] text-red-400 hover:text-red-600 font-bold transition-colors flex items-center gap-1"
+                          >
+                            <Trash2 size={10} />
+                            حذف الحالة
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => markAttendance(teacher, 'حاضر')}
+                          className={`flex-1 max-w-[100px] py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${status === 'حاضر' ? 'bg-green-500 text-white shadow-lg' : 'bg-natural-bg text-natural-secondary hover:bg-green-50 border border-natural-border'}`}
+                        >
+                          <Check size={14} />
+                          حاضر
+                        </button>
+                        <button
+                          onClick={() => markAttendance(teacher, 'غائب')}
+                          className={`flex-1 max-w-[100px] py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${status === 'غائب' ? 'bg-red-500 text-white shadow-lg' : 'bg-natural-bg text-natural-secondary hover:bg-red-50 border border-natural-border'}`}
+                        >
+                          <X size={14} />
+                          غائب
+                        </button>
+                        <button
+                          onClick={() => markAttendance(teacher, 'غائب بي تعويض')}
+                          className={`flex-1 max-w-[120px] py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${status === 'غائب بي تعويض' ? 'bg-amber-500 text-white shadow-lg' : 'bg-natural-bg text-natural-secondary hover:bg-amber-50 border border-natural-border'}`}
+                        >
+                          <RefreshCw size={14} />
+                          بي تعويض
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl border border-natural-border overflow-hidden shadow-sm">
+        <div className="p-6 border-b border-natural-border bg-natural-bg/30">
+          <h3 className="font-bold text-lg text-natural-sidebar">سجل الحضور والغياب للمعلمين</h3>
+          <p className="text-xs text-natural-secondary mt-1">عرض السجلات السابقة للحضور والغياب والتعويض</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-right" dir="rtl">
+            <thead className="bg-natural-bg/50 border-b border-natural-border">
+              <tr>
+                <th className="p-4 text-xs font-bold text-natural-sidebar">المعلم/ة</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar">التاريخ</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar text-center">الحالة</th>
+                <th className="p-4 text-xs font-bold text-natural-sidebar text-left">الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-natural-bg">
+              {[...attendance].sort((a: any, b: any) => b.date.localeCompare(a.date)).map((record: any) => (
+                <tr key={record.id} className="hover:bg-natural-bg/20 transition-colors">
+                  <td className="p-4">
+                    <span className="font-bold text-natural-sidebar text-sm">{record.teacherName}</span>
+                  </td>
+                  <td className="p-4">
+                    <span className="text-xs text-natural-secondary">{record.date}</span>
+                  </td>
+                  <td className="p-4 text-center">
+                    <span className={`inline-flex items-center px-3 py-1 rounded-full border text-[10px] font-bold ${
+                      record.status === 'حاضر' ? 'bg-green-50 text-green-600 border-green-100' : 
+                      record.status === 'غائب' ? 'bg-red-50 text-red-600 border-red-100' : 
+                      'bg-amber-50 text-amber-600 border-amber-100'
+                    }`}>
+                      {record.status}
+                    </span>
+                  </td>
+                  <td className="p-4 text-left">
+                    <button
+                      onClick={() => deleteAttendance(record.teacherName, record.date)}
+                      className="text-red-400 hover:text-red-600 p-1 transition-colors"
+                      title="حذف السجل"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {attendance.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="p-12 text-center text-natural-secondary italic">لا يوجد سجلات حضور حالياً.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </motion.div>
   );
 }
