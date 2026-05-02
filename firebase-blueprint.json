@@ -2,14 +2,14 @@
   "entities": {
     "Member": {
       "title": "Member",
-      "description": "Represents a student or member of the cooperative.",
+      "description": "Represents a club member or student.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
         "phone": { "type": "string" },
-        "startDate": { "type": "string" },
-        "endDate": { "type": "string" },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
         "status": { "type": "string", "enum": ["active", "expired", "pending"] },
         "sessionsCount": { "type": "number" },
         "attendedCount": { "type": "number" },
@@ -20,33 +20,40 @@
         "price": { "type": "string" },
         "paidAmount": { "type": "string" },
         "paymentMethod": { "type": "string", "enum": ["كاش", "تحويل", "لم يتم الدفع"] },
-        "paymentDate": { "type": "string" },
+        "paymentDate": { "type": "string", "format": "date" },
         "subscriptionDays": { "type": "number" },
-        "teacherName": { "type": "string" }
+        "teacherName": { "type": "string" },
+        "notes": { "type": "string" }
       },
       "required": ["id", "name", "startDate", "endDate", "status"]
     },
     "Course": {
       "title": "Course",
-      "description": "Represents a course or workshop offered by the cooperative.",
+      "description": "Represents a training course or workshop.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "title": { "type": "string" },
         "instructor": { "type": "string" },
-        "startDate": { "type": "string" },
-        "endDate": { "type": "string" },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
         "capacity": { "type": "number" },
         "enrolledCount": { "type": "number" },
         "status": { "type": "string", "enum": ["active", "upcoming", "completed"] },
         "price": { "type": "string" },
-        "description": { "type": "string" }
+        "duration": { "type": "string" },
+        "description": { "type": "string" },
+        "cost": { "type": "string" },
+        "associationPercentage": { "type": "string" },
+        "isSettled": { "type": "boolean" },
+        "extraIncome": { "type": "string" },
+        "extraExpenses": { "type": "string" }
       },
-      "required": ["id", "title", "instructor", "status"]
+      "required": ["id", "title", "instructor", "status", "price"]
     },
     "Trainee": {
       "title": "Trainee",
-      "description": "Represents a registered trainee in a specific course.",
+      "description": "Represents a person enrolled in a specific course.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -56,38 +63,38 @@
         "duration": { "type": "string" },
         "amount": { "type": "string" },
         "paymentMethod": { "type": "string", "enum": ["كاش", "تحويل", "لم يتم الدفع"] },
-        "date": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
         "notes": { "type": "string" }
       },
-      "required": ["id", "courseId", "fullName", "date"]
+      "required": ["id", "courseId", "fullName", "amount", "paymentMethod", "date"]
     },
     "AttendanceRecord": {
       "title": "AttendanceRecord",
-      "description": "Represents a member's attendance status for a specific date.",
+      "description": "Attendance record for a club member.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "memberId": { "type": "string" },
-        "date": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
         "status": { "type": "string", "enum": ["present", "absent", "absent_compensated", "compensated"] }
       },
       "required": ["id", "memberId", "date", "status"]
     },
     "TeacherAttendance": {
       "title": "TeacherAttendance",
-      "description": "Represents a teacher's attendance status for a specific date.",
+      "description": "Attendance record for a teacher.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "teacherName": { "type": "string" },
-        "date": { "type": "string" },
-        "status": { "type": "string", "enum": ["حاضر", "غائب"] }
+        "date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["حاضر", "غائب", "غائب بي تعويض"] }
       },
       "required": ["id", "teacherName", "date", "status"]
     },
     "AppSettings": {
       "title": "AppSettings",
-      "description": "Global application settings including icon mappings.",
+      "description": "Global application configuration.",
       "type": "object",
       "properties": {
         "icons": {
@@ -100,18 +107,22 @@
             "compensation": { "type": "string" }
           }
         },
-        "financialPassword": { "type": "string" }
+        "financialPassword": { "type": "string" },
+        "teachers": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       }
     }
   },
   "firestore": {
     "members": {
       "schema": "Member",
-      "description": "Collection of all members/students."
+      "description": "Collection of club members."
     },
     "courses": {
       "schema": "Course",
-      "description": "Collection of available courses and workshops."
+      "description": "Collection of training courses."
     },
     "trainees": {
       "schema": "Trainee",
@@ -119,15 +130,15 @@
     },
     "attendance": {
       "schema": "AttendanceRecord",
-      "description": "Collection of attendance logs."
+      "description": "Collection of member attendance records."
     },
     "teacher_attendance": {
       "schema": "TeacherAttendance",
-      "description": "Collection of teacher attendance logs."
+      "description": "Collection of teacher attendance records."
     },
-    "settings": {
+    "settings/global": {
       "schema": "AppSettings",
-      "description": "Collection for overall app settings (document: global)."
+      "description": "Global settings document."
     }
   }
 }

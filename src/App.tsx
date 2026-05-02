@@ -179,7 +179,7 @@ export default function App() {
       showNotif('تم تغيير كلمة المرور بنجاح', 'success');
     } catch (error) {
       console.error(error);
-      showNotif('حدث خطأ أثناء تغيير كلمة المرور', 'error');
+      handleFirestoreError(error, OperationType.UPDATE, 'settings/global');
     }
   };
 
@@ -213,9 +213,17 @@ export default function App() {
       handleFirestoreError(error, OperationType.GET, 'attendance');
     });
 
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), async (snapshot) => {
       if (snapshot.exists()) {
         setSettings(snapshot.data() as AppSettings);
+      } else {
+        // Initialize global settings if they don't exist
+        try {
+          await setDoc(doc(db, 'settings', 'global'), DEFAULT_SETTINGS);
+          setSettings(DEFAULT_SETTINGS);
+        } catch (error) {
+          console.error("Error initializing settings:", error);
+        }
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'settings/global');
@@ -608,8 +616,10 @@ export default function App() {
         compensationSessions: Number(editingMemberStats.compensationSessions)
       });
       setEditingMemberStats(null);
+      showNotif('تم تحديث الإحصائيات بنجاح');
     } catch (err) {
       console.error("Error updating stats:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `members/${editingMemberStats.id}`);
     }
   };
 
@@ -642,8 +652,10 @@ export default function App() {
         paidAmount: m.price,
         paymentDate: new Date().toISOString().split('T')[0]
       });
+      showNotif('تم تحديث حالة الدفع');
     } catch (err) {
       console.error("Error updating payment:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `members/${memberId}`);
     }
   };
 
@@ -680,8 +692,10 @@ export default function App() {
   const updateSettings = async (newSettings: AppSettings) => {
     try {
       await setDoc(doc(db, 'settings', 'global'), newSettings);
+      showNotif('تم حفظ الإعدادات');
     } catch (err) {
       console.error("Error updating settings:", err);
+      handleFirestoreError(err, OperationType.WRITE, 'settings/global');
     }
   };
 
@@ -1722,7 +1736,12 @@ export default function App() {
                           </div>
                           <span className="text-lg font-bold text-natural-accent">{course.price} ر.س</span>
                         </div>
-                        <h3 className="text-xl font-bold text-natural-sidebar mb-2 group-hover:text-natural-accent transition-colors">{course.title}</h3>
+                        <h3 
+                          onClick={() => setDetailsCourse(course)}
+                          className="text-xl font-bold text-natural-sidebar mb-2 group-hover:text-natural-accent transition-colors cursor-pointer"
+                        >
+                          {course.title}
+                        </h3>
                         <p className="text-sm text-natural-secondary line-clamp-2 mb-4 h-10">{course.description}</p>
                         
                         <div className="space-y-3 pt-4 border-t border-natural-bg">
@@ -2378,102 +2397,163 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Table Statistics Row */}
-                    <div className="bg-white rounded-[2rem] border-2 border-natural-sidebar/5 overflow-hidden shadow-xl shadow-natural-sidebar/5" dir="rtl">
-                    <div className="p-6 border-b border-natural-sidebar/5 bg-natural-bg/10 flex items-center justify-between">
-                      <h3 className="font-black text-natural-sidebar flex items-center gap-2">
-                        <Icons.PieChart size={20} className="text-natural-accent" />
-                        إحصائيات الدورات والتحصيل
-                      </h3>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-right border-collapse">
-                        <thead>
-                          <tr className="bg-natural-bg/50 text-natural-sidebar">
-                            <th className="p-5 text-xs font-black border-l border-natural-sidebar/5">الدورة والمدربة</th>
-                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">التاريخ والمدة</th>
-                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">المشتركين</th>
-                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">السعر</th>
-                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">الإجمالي</th>
-                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">الخصم</th>
-                            <th className="p-5 text-xs font-black text-center border-l border-natural-sidebar/5">الصافي النهائي</th>
-                            <th className="p-5 text-xs font-black text-center">الإجراء</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-natural-sidebar/5">
-                          {courses.map(course => {
-                            const ct = trainees.filter(t => t.courseId === course.id || t.courseId === course.title);
-                            const traineeIncome = ct.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
-                            const extraIncomeVal = parseFloat(course.extraIncome || '0') || 0;
-                            const finalIncome = traineeIncome + extraIncomeVal;
-                            
-                            const courseBasePrice = parseFloat(course.price || '0') || 0;
-                            const potentialTotal = ct.length * courseBasePrice;
-                            const totalDiscount = potentialTotal - finalIncome;
-                            const capacity = course.capacity || 20;
-                            const progress = Math.min(100, (ct.length / capacity) * 100);
-                            
-                            return (
-                              <tr key={course.id} className="hover:bg-natural-bg/30 transition-colors group">
-                                <td className="p-5">
-                                  <div className="flex flex-col">
-                                    <span className="font-black text-natural-sidebar text-sm">{course.title}</span>
-                                    <span className="text-[10px] font-bold text-natural-accent">المدربة: {course.instructor}</span>
+                    {/* Individual Tables For Each Course */}
+                    <div className="space-y-10 pt-4" dir="rtl">
+                      {courses.map(course => {
+                        const ct = trainees.filter(t => t.courseId === course.id || t.courseId === course.title);
+                        const traineeInc = ct.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+                        const extraInc = parseFloat(course.extraIncome || '0') || 0;
+                        const finalIncome = traineeInc + extraInc;
+                        
+                        const baseCost = parseFloat(course.cost || '0') || 0;
+                        const extraExp = parseFloat(course.extraExpenses || '0') || 0;
+                        const totalExp = baseCost + extraExp;
+                        
+                        const net = finalIncome - totalExp;
+                        const courseBasePrice = parseFloat(course.price || '0') || 0;
+                        const potentialTotal = ct.length * courseBasePrice;
+                        const totalDiscount = potentialTotal - traineeInc;
+                        const progress = Math.min(100, (ct.length / (course.capacity || 20)) * 100);
+
+                        return (
+                          <div key={course.id} className="group animate-in fade-in slide-in-from-right-4">
+                            <div className="bg-white rounded-[2rem] border-2 border-natural-sidebar/5 overflow-hidden shadow-xl shadow-natural-sidebar/5 transition-all hover:shadow-2xl hover:border-natural-accent/20">
+                              {/* Course Mini Header */}
+                              <div className="p-6 bg-natural-sidebar text-white flex flex-col md:flex-row items-center justify-between gap-4">
+                                <div className="flex items-center gap-4">
+                                  <div className="h-12 w-12 rounded-2xl bg-white/10 flex items-center justify-center text-natural-accent">
+                                    <Icons.BookOpen size={24} />
                                   </div>
-                                </td>
-                                <td className="p-5 text-center">
-                                  <div className="flex flex-col gap-1 items-center">
-                                    <div className="flex items-center gap-1 text-[10px] font-bold text-natural-sidebar">
-                                      <Icons.Calendar size={10} />
-                                      {course.startDate}
-                                    </div>
-                                    <span className="text-[9px] bg-natural-sidebar/5 px-2 py-0.5 rounded-full text-natural-secondary">
-                                      {course.duration || 'غير محدد'}
+                                  <div>
+                                    <h4 className="text-lg font-black">{course.title}</h4>
+                                    <p className="text-xs font-bold text-white/70">المدربة: {course.instructor}</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <div className="text-left px-4 border-l border-white/10">
+                                    <span className="text-[10px] font-bold text-white/50 block">حالة التحصيل</span>
+                                    <span className={`text-xs font-black ${course.isSettled ? 'text-green-400' : 'text-yellow-400'}`}>
+                                      {course.isSettled ? 'تمت التسوية' : 'بانتظار التسوية'}
                                     </span>
                                   </div>
-                                </td>
-                                <td className="p-5 text-center">
-                                  <div className="flex flex-col items-center">
-                                    <span className="font-black text-natural-sidebar">{ct.length}</span>
-                                    <div className="w-16 h-1 bg-natural-bg rounded-full mt-1 overflow-hidden">
-                                      <div className="h-full bg-natural-accent" style={{ width: `${progress}%` }} />
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="p-5 text-center font-bold text-natural-secondary text-xs">
-                                  {courseBasePrice.toLocaleString()} ر.س
-                                </td>
-                                <td className="p-5 text-center font-bold text-natural-sidebar text-xs">
-                                  {potentialTotal.toLocaleString()}
-                                </td>
-                                <td className="p-5 text-center font-bold text-red-400 text-xs">
-                                  {totalDiscount > 0 ? `-${totalDiscount.toLocaleString()}` : '0'}
-                                </td>
-                                <td className="p-5 text-center">
-                                  <div className="flex flex-col items-center">
-                                    <span className="font-black text-green-600 bg-green-50 px-3 py-1 rounded-lg border border-green-100">
-                                      {finalIncome.toLocaleString()} ر.س
-                                    </span>
-                                    {course.isSettled && (
-                                      <span className="text-[8px] font-black bg-green-600 text-white px-1.5 rounded-full mt-1">تمت التسوية</span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="p-5 text-center">
                                   <button 
                                     onClick={() => setSelectedAccountingCourseId(course.id)}
-                                    className="p-2.5 bg-white border-2 border-natural-border text-natural-sidebar rounded-xl hover:bg-natural-sidebar hover:text-white hover:border-natural-sidebar transition-all shadow-sm group/btn"
+                                    className="p-3 bg-natural-accent text-white rounded-xl hover:scale-105 transition-transform shadow-lg shadow-black/20"
+                                    title="عرض التفاصيل الكاملة"
                                   >
-                                    <Icons.FileText size={18} className="group-hover/btn:scale-110 transition-transform" />
+                                    <Icons.ChevronLeft size={20} />
                                   </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                </div>
+                              </div>
+
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-right border-collapse">
+                                  <thead>
+                                    <tr className="bg-natural-bg/50 text-natural-sidebar text-[10px] uppercase font-black">
+                                      <th className="p-4 border-l border-natural-sidebar/5">المشتركين</th>
+                                      <th className="p-4 border-l border-natural-sidebar/5 text-center">إجمالي الدخل</th>
+                                      <th className="p-4 border-l border-natural-sidebar/5 text-center">إجمالي التكاليف</th>
+                                      <th className="p-4 border-l border-natural-sidebar/5 text-center">حصة الجمعية</th>
+                                      <th className="p-4 border-l border-natural-sidebar/5 text-center">حصة المدربة</th>
+                                      <th className="p-4 text-center">الصافي النهائي</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr className="text-natural-sidebar group-hover:bg-natural-bg/10 transition-colors">
+                                      <td className="p-4 border-l border-natural-sidebar/5">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-lg font-black">{ct.length}</span>
+                                          <div className="flex-1 h-1.5 w-16 bg-natural-bg rounded-full overflow-hidden">
+                                            <div className="h-full bg-natural-accent" style={{ width: `${progress}%` }} />
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="p-4 text-center border-l border-natural-sidebar/5">
+                                        <div className="flex flex-col items-center">
+                                          <span className="font-black text-natural-sidebar">{finalIncome.toLocaleString()} ر.س</span>
+                                          <span className="text-[8px] font-bold text-natural-secondary italic">
+                                            ({traineeInc} متدربين + {extraInc} إضافي)
+                                          </span>
+                                        </div>
+                                      </td>
+                                      <td className="p-4 text-center border-l border-natural-sidebar/5 font-bold text-red-500">
+                                        {totalExp.toLocaleString()} ر.س
+                                      </td>
+                                      <td className="p-4 text-center border-l border-natural-sidebar/5">
+                                        <div className="flex flex-col items-center">
+                                          <span className="font-black text-natural-sidebar">
+                                            {(net > 0 ? (net * (parseFloat(course.associationPercentage || '30') / 100)) : 0).toLocaleString()} ر.س
+                                          </span>
+                                          <span className="text-[8px] font-bold text-natural-secondary">{course.associationPercentage || '30'}%</span>
+                                        </div>
+                                      </td>
+                                      <td className="p-4 text-center border-l border-natural-sidebar/5">
+                                        <div className="flex flex-col items-center">
+                                          <span className="font-black text-natural-sidebar">
+                                            {(net > 0 ? (net * ((100 - parseFloat(course.associationPercentage || '30')) / 100)) : 0).toLocaleString()} ر.س
+                                          </span>
+                                          <span className="text-[8px] font-bold text-natural-secondary">{100 - parseFloat(course.associationPercentage || '30')}%</span>
+                                        </div>
+                                      </td>
+                                      <td className="p-4 text-center">
+                                        <span className={`px-4 py-2 rounded-xl font-black text-sm border-2 ${net >= 0 ? 'bg-green-50 text-green-600 border-green-100' : 'bg-red-50 text-red-600 border-red-100'}`}>
+                                          {net.toLocaleString()} ر.س
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                              
+                              {/* Statistical Indicators Row */}
+                              <div className="p-5 bg-gray-50/80 border-t border-natural-sidebar/5 grid grid-cols-2 md:grid-cols-4 gap-4" dir="rtl">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-natural-sidebar shadow-sm">
+                                    <Icons.Target size={14} />
+                                  </div>
+                                  <div>
+                                    <p className="text-[9px] font-black text-natural-secondary">نسبة الإشغال</p>
+                                    <p className="text-xs font-black text-natural-sidebar">{Math.round(progress)}%</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-natural-accent shadow-sm">
+                                    <Icons.TrendingUp size={14} />
+                                  </div>
+                                  <div>
+                                    <p className="text-[9px] font-black text-natural-secondary">متوسط المدخول/متدرب</p>
+                                    <p className="text-xs font-black text-natural-sidebar">
+                                      {ct.length > 0 ? Math.round(traineeInc / ct.length).toLocaleString() : 0} ر.س
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-red-400 shadow-sm">
+                                    <Icons.Percent size={14} />
+                                  </div>
+                                  <div>
+                                    <p className="text-[9px] font-black text-natural-secondary">هامش الربح</p>
+                                    <p className="text-xs font-black text-natural-sidebar">
+                                      {finalIncome > 0 ? Math.round((net / finalIncome) * 100) : 0}%
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-blue-400 shadow-sm">
+                                    <Icons.Calendar size={14} />
+                                  </div>
+                                  <div>
+                                    <p className="text-[9px] font-black text-natural-secondary">التوقيت</p>
+                                    <p className="text-xs font-black text-natural-sidebar">{course.duration || 'مستمرة'}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
+
                 </div>
               ) : (
                   <div className="space-y-6" dir="rtl">
@@ -3543,63 +3623,91 @@ export default function App() {
           {/* Course Details Modal */}
           <AnimatePresence>
             {detailsCourse && (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-natural-sidebar/40 backdrop-blur-sm">
+              <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-natural-sidebar/40 backdrop-blur-md">
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl border border-natural-border"
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="bg-white w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl border border-natural-border"
                 >
-                  <div className="bg-natural-sidebar p-6 text-white flex justify-between items-center">
-                    <h3 className="text-xl font-bold">تفاصيل الدورة التدريبية</h3>
-                    <button onClick={() => setDetailsCourse(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                      <X size={20} />
+                  <div className="bg-natural-sidebar p-8 text-white relative">
+                    <button 
+                      onClick={() => setDetailsCourse(null)} 
+                      className="absolute left-8 top-8 p-2 hover:bg-white/10 rounded-full transition-colors"
+                    >
+                      <X size={24} />
                     </button>
-                  </div>
-                  <div className="p-8 space-y-6">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="text-2xl font-bold text-natural-sidebar">{detailsCourse.title}</h4>
-                        <p className="text-natural-accent font-bold mt-1">{detailsCourse.instructor}</p>
+                    <div className="flex flex-col items-center text-center">
+                      <div className="w-20 h-20 bg-white/10 rounded-[2rem] flex items-center justify-center mb-4">
+                        <Icons.BookOpen size={40} className="text-natural-accent" />
                       </div>
-                      <div className="bg-natural-accent/10 text-natural-accent px-4 py-2 rounded-2xl font-bold">
-                        {detailsCourse.price} ر.س
+                      <h3 className="text-3xl font-black mb-2">{detailsCourse.title}</h3>
+                      <div className="flex items-center gap-2 text-white/80 font-bold">
+                        <Icons.User size={18} className="text-natural-accent" />
+                        <span>المدربة: {detailsCourse.instructor}</span>
                       </div>
                     </div>
+                  </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="p-4 bg-natural-bg/50 rounded-2xl border border-natural-border">
-                        <p className="text-xs text-natural-secondary mb-1">تاريخ البدء</p>
+                  <div className="p-8 space-y-8" dir="rtl">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="p-4 bg-natural-bg/50 rounded-2xl border border-natural-border flex flex-col items-center text-center">
+                        <Icons.Calendar size={20} className="text-natural-sidebar mb-2" />
+                        <p className="text-[10px] text-natural-secondary font-black mb-1">تاريخ البدء</p>
                         <p className="font-bold text-natural-sidebar">{detailsCourse.startDate}</p>
                       </div>
-                      <div className="p-4 bg-natural-bg/50 rounded-2xl border border-natural-border">
-                        <p className="text-xs text-natural-secondary mb-1">تاريخ الانتهاء</p>
-                        <p className="font-bold text-natural-sidebar">{detailsCourse.endDate}</p>
+                      <div className="p-4 bg-natural-bg/50 rounded-2xl border border-natural-border flex flex-col items-center text-center">
+                        <Icons.Clock size={20} className="text-natural-sidebar mb-2" />
+                        <p className="text-[10px] text-natural-secondary font-black mb-1">المدة التدريبية</p>
+                        <p className="font-bold text-natural-sidebar">{detailsCourse.duration || detailsCourse.endDate || 'غير محددة'}</p>
                       </div>
-                      <div className="p-4 bg-natural-bg/50 rounded-2xl border border-natural-border">
-                        <p className="text-xs text-natural-secondary mb-1">السعة القصوى</p>
-                        <p className="font-bold text-natural-sidebar">{detailsCourse.capacity} متدرب</p>
-                      </div>
-                      <div className="p-4 bg-natural-bg/50 rounded-2xl border border-natural-border">
-                        <p className="text-xs text-natural-secondary mb-1">الحالة</p>
-                        <p className="font-bold text-natural-sidebar">
-                          {detailsCourse.status === 'active' ? 'نشطة' : detailsCourse.status === 'upcoming' ? 'قادمة' : 'مكتملة'}
-                        </p>
+                      <div className="p-4 bg-natural-bg/50 rounded-2xl border border-natural-border flex flex-col items-center text-center">
+                        <Icons.Tag size={20} className="text-natural-sidebar mb-2" />
+                        <p className="text-[10px] text-natural-secondary font-black mb-1">سعر الدورة</p>
+                        <p className="font-bold text-natural-accent">{detailsCourse.price} ر.س</p>
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <p className="text-xs font-bold text-natural-sidebar uppercase tracking-wider">وصف الدورة</p>
-                      <p className="text-natural-secondary leading-relaxed bg-natural-bg p-4 rounded-2xl border border-natural-border">
-                        {detailsCourse.description || 'لا يوجد وصف متاح لهذه الدورة.'}
-                      </p>
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 text-natural-sidebar">
+                        <Icons.FileText size={18} />
+                        <h4 className="font-black">وصف وتفاصيل الدورة</h4>
+                      </div>
+                      <div className="bg-natural-bg p-6 rounded-3xl border border-natural-sidebar/5 min-h-[120px] text-natural-sidebar leading-loose font-medium shadow-inner shadow-black/5">
+                        {detailsCourse.description || 'لم يتم إضافة وصف لهذه الدورة حتى الآن.'}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-6 pt-4">
+                      <div className="flex items-center gap-4 p-4 rounded-3xl bg-gray-50 border border-gray-100">
+                        <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                          <Icons.Users size={20} className="text-natural-sidebar" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-natural-secondary font-black">المقاعد المكتملة</p>
+                          <p className="text-xl font-black text-natural-sidebar">{detailsCourse.enrolledCount} / {detailsCourse.capacity}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 p-4 rounded-3xl bg-gray-50 border border-gray-100">
+                        <div className={`w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm`}>
+                          <div className={`w-3 h-3 rounded-full animate-pulse ${
+                            detailsCourse.status === 'active' ? 'bg-green-500' : detailsCourse.status === 'upcoming' ? 'bg-blue-500' : 'bg-gray-400'
+                          }`} />
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-natural-secondary font-black">حالة الدورة</p>
+                          <p className="text-lg font-black text-natural-sidebar">
+                            {detailsCourse.status === 'active' ? 'نشطة حالياً' : detailsCourse.status === 'upcoming' ? 'قريباً' : 'مكتملة'}
+                          </p>
+                        </div>
+                      </div>
                     </div>
 
                     <button 
                       onClick={() => setDetailsCourse(null)}
-                      className="w-full bg-natural-sidebar text-white py-4 rounded-2xl font-bold hover:bg-opacity-90 transition-all shadow-lg"
+                      className="w-full bg-natural-sidebar text-white py-5 rounded-[2rem] font-black hover:bg-natural-accent transition-all shadow-xl shadow-natural-sidebar/20 flex items-center justify-center gap-3"
                     >
-                      إغلاق التفاصيل
+                      إغلاق نافذة التفاصيل
                     </button>
                   </div>
                 </motion.div>

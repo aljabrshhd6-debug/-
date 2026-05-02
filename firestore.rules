@@ -1,73 +1,121 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    // Capture standard data shortcuts
-    function incomingData() {
-      return request.resource.data;
-    }
-
-    // Default deny
+    // 0. Default Deny
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Members collection
+    // 3. Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidMember(data) {
+      return data.keys().hasAll(['id', 'name', 'startDate', 'endDate', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && data.startDate is string && data.startDate.size() <= 32
+        && data.endDate is string && data.endDate.size() <= 32
+        && data.status in ['active', 'expired', 'pending'];
+    }
+
+    function isValidCourse(data) {
+      return data.keys().hasAll(['id', 'title', 'instructor', 'status', 'price'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() <= 300
+        && data.instructor is string && data.instructor.size() <= 200
+        && data.status in ['active', 'upcoming', 'completed']
+        && data.price is string && data.price.size() <= 32;
+    }
+
+    function isValidTrainee(data) {
+      return data.keys().hasAll(['id', 'courseId', 'fullName', 'amount', 'paymentMethod', 'date'])
+        && data.id is string && data.id.size() <= 128
+        && data.courseId is string && data.courseId.size() <= 128
+        && data.fullName is string && data.fullName.size() <= 200
+        && data.amount is string && data.amount.size() <= 32
+        && data.paymentMethod in ['كاش', 'تحويل', 'لم يتم الدفع']
+        && data.date is string && data.date.size() <= 32;
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['id', 'memberId', 'date', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.memberId is string && data.memberId.size() <= 128
+        && data.date is string && data.date.size() <= 32
+        && data.status in ['present', 'absent', 'absent_compensated', 'compensated'];
+    }
+
+    function isValidTeacherAttendance(data) {
+      return data.keys().hasAll(['id', 'teacherName', 'date', 'status'])
+        && data.id is string && data.id.size() <= 128
+        && data.teacherName is string && data.teacherName.size() <= 200
+        && data.date is string && data.date.size() <= 32
+        && data.status in ['حاضر', 'غائب', 'غائب بي تعويض'];
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['icons'])
+        && data.icons is map
+        && (!('financialPassword' in data) || data.financialPassword is string)
+        && (!('teachers' in data) || data.teachers is list);
+    }
+
+    // --- Collections ---
+
     match /members/{memberId} {
-      allow read, list: if true;
-      allow create: if isValidId(memberId) &&
-        incomingData().keys().hasAll(['id', 'name', 'startDate', 'endDate', 'status']) &&
-        incomingData().name is string && incomingData().name.size() > 0 &&
-        incomingData().name.size() <= 100;
-      allow update: if true &&
-        incomingData().diff(resource.data).affectedKeys().hasAny(['name', 'phone', 'startDate', 'endDate', 'status', 'sessionsCount', 'attendedCount', 'absentCount', 'compensationSessions', 'grade', 'subjects', 'price', 'paidAmount', 'paymentMethod', 'paymentDate', 'subscriptionDays', 'teacherName']);
-      allow delete: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(memberId) && isValidMember(incoming());
+      allow update: if isSignedIn() && isValidMember(incoming());
+      allow delete: if isSignedIn();
     }
 
-    // Courses collection
     match /courses/{courseId} {
-      allow read, list: if true;
-      allow create: if isValidId(courseId) &&
-        incomingData().keys().hasAll(['id', 'title', 'instructor', 'status']) &&
-        incomingData().title is string && incomingData().title.size() <= 200;
-      allow update: if true &&
-        incomingData().diff(resource.data).affectedKeys().hasAny(['title', 'instructor', 'startDate', 'endDate', 'capacity', 'enrolledCount', 'status', 'price', 'description']);
-      allow delete: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(courseId) && isValidCourse(incoming());
+      allow update: if isSignedIn() && isValidCourse(incoming());
+      allow delete: if isSignedIn();
     }
 
-    // Trainees collection
     match /trainees/{traineeId} {
-      allow read, list: if true;
-      allow create: if isValidId(traineeId) &&
-        incomingData().keys().hasAll(['id', 'courseId', 'fullName', 'date']) &&
-        incomingData().fullName is string && incomingData().fullName.size() <= 100;
-      allow update: if true &&
-        incomingData().diff(resource.data).affectedKeys().hasAny(['fullName', 'motherPhone', 'duration', 'amount', 'paymentMethod', 'date', 'notes']);
-      allow delete: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(traineeId) && isValidTrainee(incoming());
+      allow update: if isSignedIn() && isValidTrainee(incoming());
+      allow delete: if isSignedIn();
     }
 
-    // Attendance collection
-    match /attendance/{attendanceId} {
-      allow read, list: if true;
-      allow create: if isValidId(attendanceId) &&
-        incomingData().keys().hasAll(['id', 'memberId', 'date', 'status']);
-      allow update: if true &&
-        incomingData().diff(resource.data).affectedKeys().hasAny(['status']);
-      allow delete: if true;
+    match /attendance/{recordId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(recordId) && isValidAttendance(incoming());
+      allow update: if isSignedIn() && isValidAttendance(incoming());
+      allow delete: if isSignedIn();
     }
 
-    // Settings collection
-    match /settings/{settingId} {
-      allow read: if true;
-      allow write: if true;
+    match /teacher_attendance/{recordId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(recordId) && isValidTeacherAttendance(incoming());
+      allow update: if isSignedIn() && isValidTeacherAttendance(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    match /settings/global {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidSettings(incoming());
     }
   }
 }
