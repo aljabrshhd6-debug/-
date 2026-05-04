@@ -735,9 +735,6 @@ export default function App() {
         { id: 'courses_add', label: 'إضافة دورة' },
         { id: 'courses_trainees', label: 'تسجيل المتدربين' },
         { id: 'courses_accounting', label: 'محاسبة الدورات' },
-        { id: 'course_fun', label: 'ساعة مرح وساعة فن' },
-        { id: 'course_rose', label: 'ورشة صناعة الورد المخملي' },
-        { id: 'course_bread', label: 'فن خبز المسح' },
       ]
     },
     { 
@@ -1879,13 +1876,8 @@ export default function App() {
                         </button>
                         <button 
                           onClick={() => {
-                            if (course.title === 'ساعة مرح وساعة فن') setView('course_fun');
-                            else if (course.title === 'ورشة صناعة الورد المخملي') setView('course_rose');
-                            else if (course.title === 'فن خبز المسح') setView('course_bread');
-                            else {
-                                setSelectedCourseId(course.id);
-                                setView('courses_trainees');
-                            }
+                            setSelectedCourseId(course.id);
+                            setView('courses_trainees');
                           }}
                           className="flex-1 bg-natural-sidebar text-white py-2 rounded-xl text-sm font-bold hover:bg-opacity-90 transition-all font-bold"
                         >
@@ -2355,8 +2347,9 @@ export default function App() {
                       <Icons.ChevronDown size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-natural-secondary pointer-events-none" />
                     </div>
                   </div>
+                </div>
 
-                  {!selectedAccountingCourseId && (
+                {!selectedAccountingCourseId && (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
                       <div className="bg-white p-4 rounded-2xl shadow-sm border border-natural-border flex items-center justify-between transition-all hover:shadow-md">
                         <div>
@@ -2390,47 +2383,28 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Course Titles Ribbon - Specific Highlights */}
-                      <div className="md:col-span-3 overflow-x-auto no-scrollbar pb-2">
-                        <div className="flex flex-col gap-3" dir="rtl">
+                      {courses.length > 0 && (
+                        <div className="md:col-span-3 pt-2 border-t border-natural-sidebar/5">
                           <div className="flex items-center gap-2">
-                            <span className="shrink-0 text-[10px] font-black text-natural-secondary bg-natural-bg px-2 py-1 rounded-lg">الدورات النشطة:</span>
-                            <div className="flex items-center gap-2">
-                              {['ساعة مرح وساعة فن', 'ورشة صناعة الورد المخملي', 'فن خبز المسح'].map((title, idx) => (
-                                <div 
-                                  key={idx}
-                                  className="shrink-0 px-4 py-2 bg-gradient-to-r from-natural-sidebar/5 to-transparent border-r-4 border-natural-accent rounded-l-xl text-xs font-black text-natural-sidebar shadow-sm animate-in fade-in zoom-in"
-                                  style={{ animationDelay: `${idx * 150}ms` }}
+                            <span className="shrink-0 text-[10px] font-black text-natural-secondary px-2 italic">قائمة النظام:</span>
+                            <div className="flex flex-wrap gap-2">
+                              {courses.map(c => (
+                                <button 
+                                  key={c.id}
+                                  onClick={() => setSelectedAccountingCourseId(c.id)}
+                                  className="px-3 py-1 bg-white border border-natural-border rounded-xl text-[10px] font-bold text-natural-sidebar shadow-sm hover:border-natural-accent hover:text-natural-accent transition-all"
                                 >
-                                  {title}
-                                </div>
+                                  {c.title}
+                                </button>
                               ))}
                             </div>
                           </div>
-                          
-                          {courses.length > 0 && (
-                            <div className="flex items-center gap-2 pt-2 border-t border-natural-sidebar/5">
-                              <span className="shrink-0 text-[10px] font-black text-natural-secondary px-2 italic">قائمة النظام:</span>
-                              <div className="flex flex-wrap gap-2">
-                                {courses.map(c => (
-                                  <button 
-                                    key={c.id}
-                                    onClick={() => setSelectedAccountingCourseId(c.id)}
-                                    className="px-3 py-1 bg-white border border-natural-border rounded-xl text-[10px] font-bold text-natural-sidebar shadow-sm hover:border-natural-accent hover:text-natural-accent transition-all"
-                                  >
-                                    {c.title}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
-                </div>
 
-                {!selectedAccountingCourseId ? (
+                  {!selectedAccountingCourseId ? (
                   <div className="space-y-6">
                     {/* Visual Charts Section */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" dir="rtl">
@@ -2949,93 +2923,6 @@ export default function App() {
                     })()}
                   </div>
                 )}
-              </motion.div>
-            )}
-
-            {(view === 'course_fun' || view === 'course_rose' || view === 'course_bread') && (
-              <motion.div
-                key={view}
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-                className="space-y-6"
-              >
-                <div className="bg-natural-sidebar rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">
-                  <div className="relative z-10">
-                    <h2 className="text-3xl font-bold mb-2">
-                      {view === 'course_fun' ? 'ساعة مرح وساعة فن' : 
-                       view === 'course_rose' ? 'ورشة صناعة الورد المخملي' : 'فن خبز المسح'}
-                    </h2>
-                    <p className="text-white/60">قائمة المتدربين المسجلين في هذه الدورة ومتابعة بياناتهم.</p>
-                  </div>
-                  <div className="absolute top-0 right-0 p-8 opacity-10">
-                    <BookOpen size={120} />
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-3xl border border-natural-border overflow-hidden shadow-sm">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-right">
-                      <thead className="bg-natural-bg/50 border-b border-natural-border">
-                        <tr>
-                          <th className="p-4 text-xs font-bold text-natural-sidebar">الأسم ثلاثي</th>
-                          <th className="p-4 text-xs font-bold text-natural-sidebar">رقم جوال الأم</th>
-                          <th className="p-4 text-xs font-bold text-natural-sidebar">المبلغ</th>
-                          <th className="p-4 text-xs font-bold text-natural-sidebar">طريقة الدفع</th>
-                          <th className="p-4 text-xs font-bold text-natural-sidebar">تاريخ التسجيل</th>
-                          <th className="p-4 text-xs font-bold text-natural-sidebar">ملاحظات</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-natural-bg">
-                        {trainees.filter(t => {
-                          const courseName = view === 'course_fun' ? 'ساعة مرح وساعة فن' : 
-                                            view === 'course_rose' ? 'ورشة صناعة الورد المخملي' : 'فن خبز المسح';
-                          const course = courses.find(c => c.id === t.courseId);
-                          return (course?.title === courseName) || (t.courseId === courseName);
-                        }).length === 0 ? (
-                          <tr>
-                            <td colSpan={6} className="p-10 text-center text-gray-400 font-bold">
-                              لا يوجد متدربين مسجلين في هذه الدورة حتى الآن
-                            </td>
-                          </tr>
-                        ) : (
-                          trainees.filter(t => {
-                            const courseName = view === 'course_fun' ? 'ساعة مرح وساعة فن' : 
-                                              view === 'course_rose' ? 'ورشة صناعة الورد المخملي' : 'فن خبز المسح';
-                            const course = courses.find(c => c.id === t.courseId);
-                            return (course?.title === courseName) || (t.courseId === courseName);
-                          }).map(trainee => (
-                            <tr key={trainee.id} className="hover:bg-natural-bg/20 transition-colors">
-                              <td className="p-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-natural-accent/10 rounded-lg flex items-center justify-center text-natural-accent text-xs font-bold">
-                                    {trainee.fullName[0]}
-                                  </div>
-                                  <span className="font-semibold text-sm">{trainee.fullName}</span>
-                                </div>
-                              </td>
-                              <td className="p-4 text-sm font-mono">{trainee.motherPhone}</td>
-                              <td className="p-4 text-sm font-bold text-natural-sidebar">{trainee.amount} ر.س</td>
-                              <td className="p-4">
-                                <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
-                                  trainee.paymentMethod === 'كاش' 
-                                    ? 'bg-orange-50 text-orange-600 border-orange-100' 
-                                    : trainee.paymentMethod === 'تحويل'
-                                    ? 'bg-blue-50 text-blue-600 border-blue-100'
-                                    : 'bg-red-50 text-red-500 border-red-100'
-                                }`}>
-                                  {trainee.paymentMethod}
-                                </span>
-                              </td>
-                              <td className="p-4 text-xs font-mono">{trainee.date}</td>
-                              <td className="p-4 text-xs text-natural-secondary">{trainee.notes || '-'}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
               </motion.div>
             )}
 
