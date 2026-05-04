@@ -884,42 +884,7 @@ export default function App() {
     }
   };
 
-  if (authLoading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-natural-bg" dir="rtl">
-        <div className="text-center">
-          <RefreshCw className="animate-spin text-natural-accent mx-auto mb-4" size={48} />
-          <p className="text-natural-sidebar font-bold">جاري تحميل النظام...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-natural-bg p-4" dir="rtl">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-white p-10 rounded-[3rem] shadow-2xl border border-natural-border text-center max-w-md w-full"
-        >
-          <div className="w-24 h-24 bg-natural-accent/10 rounded-[2rem] flex items-center justify-center mx-auto mb-6 text-natural-accent">
-            <Lock size={48} />
-          </div>
-          <h1 className="text-3xl font-black text-natural-sidebar mb-2">تسجيل الدخول</h1>
-          <p className="text-natural-secondary font-medium mb-10">يرجى تسجيل الدخول للوصول إلى نظام إدارة النادي</p>
-          
-          <button
-            onClick={() => signInWithGoogle()}
-            className="w-full bg-natural-sidebar text-white py-5 rounded-[2rem] font-black hover:bg-natural-accent transition-all shadow-xl shadow-natural-sidebar/20 flex items-center justify-center gap-3"
-          >
-            <LogIn size={20} />
-            الدخول باستخدام جوجل
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
+  // Remove authentication check blocks to allow direct access to the app
 
   return (
     <div className="flex h-screen bg-natural-bg text-natural-primary font-sans relative" dir="rtl">
@@ -1034,15 +999,7 @@ export default function App() {
             </div>
           </div>
           
-          {user && (
-            <button
-              onClick={() => logout()}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white/70 hover:bg-red-500/10 hover:text-red-400 transition-all border border-transparent hover:border-red-500/20"
-            >
-              <LogOut size={18} />
-              <span className="text-sm font-bold">تسجيل الخروج</span>
-            </button>
-          )}
+          {/* Logout button removed */}
         </div>
       </aside>
 
