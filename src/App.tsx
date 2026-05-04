@@ -281,6 +281,10 @@ export default function App() {
   const [detailsCourse, setDetailsCourse] = useState<Course | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [searchMember, setSearchMember] = useState('');
+  const [editingTrainee, setEditingTrainee] = useState<Trainee | null>(null);
+  const [traineeToDelete, setTraineeToDelete] = useState<Trainee | null>(null);
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [memberToDelete, setMemberToDelete] = useState<Member | null>(null);
   const [courseFilter, setCourseFilter] = useState<'all' | 'active' | 'upcoming' | 'completed'>('all');
 
   const filteredCourses = courses.filter(c => {
@@ -531,8 +535,9 @@ export default function App() {
     }
   };
 
-  const handleRegisterTrainee = async (e: React.FormEvent, keepOpen = false) => {
+  const handleRegisterTrainee = async (e: React.FormEvent, keepOpenInput: any = false) => {
     e.preventDefault();
+    const keepOpen = typeof keepOpenInput === 'boolean' ? keepOpenInput : false;
     if (!newTrainee.fullName || !newTrainee.courseId) {
       showNotif('يرجى اختيار المتدرب والدورة', 'error');
       return;
@@ -616,11 +621,81 @@ export default function App() {
   };
 
   const deleteCourse = async (id: string) => {
+    if (!window.confirm('هل أنت متأكد من حذف هذه الدورة؟ لا يمكن التراجع عن هذا الإجراء.')) return;
     try {
       await deleteDoc(doc(db, 'courses', id));
       showNotif('تم حذف الدورة');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `courses/${id}`);
+    }
+  };
+
+  const deleteTrainee = async (trainee: Trainee) => {
+    try {
+      await deleteDoc(doc(db, 'trainees', trainee.id));
+      
+      const course = courses.find(c => c.id === trainee.courseId || c.title === trainee.courseId);
+      if (course) {
+        await updateDoc(doc(db, 'courses', course.id), {
+          enrolledCount: Math.max(0, (course.enrolledCount || 1) - 1)
+        });
+      }
+      
+      showNotif('تم حذف المتدرب بنجاح');
+    } catch (err) {
+      console.error("Error deleting trainee:", err);
+      handleFirestoreError(err, OperationType.DELETE, `trainees/${trainee.id}`);
+    }
+  };
+
+  const handleUpdateTrainee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTrainee) return;
+    try {
+      await updateDoc(doc(db, 'trainees', editingTrainee.id), {
+        fullName: editingTrainee.fullName,
+        motherPhone: editingTrainee.motherPhone || '',
+        courseId: editingTrainee.courseId,
+        duration: editingTrainee.duration,
+        amount: editingTrainee.amount,
+        paymentMethod: editingTrainee.paymentMethod,
+        date: editingTrainee.date,
+        notes: editingTrainee.notes || ''
+      });
+      setEditingTrainee(null);
+      showNotif('تم تحديث بيانات المتدرب بنجاح');
+    } catch (err) {
+      console.error("Error updating trainee:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `trainees/${editingTrainee.id}`);
+    }
+  };
+
+  const handleUpdateMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMember) return;
+    try {
+      await updateDoc(doc(db, 'members', editingMember.id), {
+        name: editingMember.name,
+        phone: editingMember.phone,
+        startDate: editingMember.startDate,
+        endDate: editingMember.endDate,
+        grade: editingMember.grade,
+        subjects: editingMember.subjects,
+        price: editingMember.price,
+        paidAmount: editingMember.paidAmount,
+        paymentMethod: editingMember.paymentMethod,
+        paymentDate: editingMember.paymentDate,
+        teacherName: editingMember.teacherName,
+        notes: editingMember.notes,
+        status: editingMember.status,
+        compensationSessions: editingMember.compensationSessions,
+        subscriptionDays: editingMember.subscriptionDays
+      });
+      setEditingMember(null);
+      showNotif('تم تحديث بيانات المشترك بنجاح');
+    } catch (err) {
+      console.error("Error updating member:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `members/${editingMember.id}`);
     }
   };
 
@@ -696,6 +771,7 @@ export default function App() {
   };
 
   const deleteTeacherAttendance = async (teacherName: string, date?: string) => {
+    if (!window.confirm(`هل أنت متأكد من حذف تحضير ${teacherName}؟`)) return;
     const targetDate = date || new Date().toISOString().split('T')[0];
     const id = `${teacherName}_${targetDate}`;
     
@@ -1185,7 +1261,17 @@ export default function App() {
                               type="button" 
                               onClick={() => {
                                 const today = new Date().toISOString().split('T')[0];
-                                setNewMember({...newMember, startDate: today});
+                                let newEnd = newMember.endDate;
+                                if (newMember.subscriptionDays) {
+                                  try {
+                                    const d = new Date(today);
+                                    d.setDate(d.getDate() + (newMember.subscriptionDays || 0));
+                                    if (!isNaN(d.getTime())) {
+                                      newEnd = d.toISOString().split('T')[0];
+                                    }
+                                  } catch(err) {}
+                                }
+                                setNewMember({...newMember, startDate: today, endDate: newEnd});
                               }}
                               className="w-full text-[10px] text-natural-accent font-black hover:bg-natural-accent/5 py-1 rounded-lg transition-colors mt-1"
                             >
@@ -1555,11 +1641,21 @@ export default function App() {
                       className="flex-[2] bg-natural-sidebar text-white p-5 rounded-[1.5rem] font-bold hover:bg-opacity-95 transition-all shadow-xl shadow-natural-sidebar/10 flex items-center justify-center gap-3 group"
                     >
                       <Icons.Save size={20} className="group-hover:scale-110 transition-transform" />
-                      حفظ
+                      حفظ وإغلاق
                     </button>
                     <button 
                       type="button"
-                      onClick={() => setIsAddModalOpen(false)}
+                      onClick={(e) => handleAddMember(e, true)}
+                      className="flex-[2] bg-natural-accent/10 text-natural-sidebar p-5 rounded-[1.5rem] font-bold hover:bg-natural-accent/20 transition-all flex items-center justify-center gap-3 border border-natural-accent/30 group"
+                    >
+                      <Icons.UserPlus size={20} className="group-hover:rotate-12 transition-transform" />
+                      حفظ وإضافة مشترك آخر
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setIsAddModalOpen(false);
+                      }}
                       className="flex-1 bg-natural-bg text-natural-sidebar p-5 rounded-[1.5rem] font-bold hover:bg-natural-border transition-all border border-natural-border"
                     >
                       إلغاء
@@ -1588,7 +1684,7 @@ export default function App() {
                 teachers={settings.teachers || []}
                 attendance={teacherAttendance}
                 markAttendance={markTeacherAttendance}
-                deleteAttendance={deleteTeacherAttendance}
+                deleteTeacherAttendance={deleteTeacherAttendance}
                 onAddTeacher={(name: string) => {
                   if (name.trim() && !settings.teachers?.includes(name.trim())) {
                     const updatedTeachers = [...(settings.teachers || []), name.trim()];
@@ -1655,7 +1751,7 @@ export default function App() {
                         <div key={m.id} className="flex items-center justify-between p-3 hover:bg-natural-bg rounded-lg transition-colors border border-transparent hover:border-natural-border">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 bg-natural-accent/10 rounded-full flex items-center justify-center text-natural-accent font-bold">
-                              {m.name[0]}
+                              {(m.name || '')[0]}
                             </div>
                             <div>
                               <p className="font-medium text-sm text-natural-primary">{m.name}</p>
@@ -1718,7 +1814,7 @@ export default function App() {
                           <div key={m.id} className="flex items-center justify-between p-3 bg-red-50/50 rounded-xl border border-red-100/50 group hover:bg-red-50 transition-all">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 bg-red-100 text-red-600 rounded-full flex items-center justify-center font-bold">
-                                {m.name[0]}
+                                {(m.name || '')[0]}
                               </div>
                               <div>
                                 <p className="font-bold text-sm text-red-900">{m.name}</p>
@@ -2027,12 +2123,20 @@ export default function App() {
                     <button 
                       type="button" 
                       onClick={(e) => handleSaveCourse(e, false)}
-                      className="flex-[2] bg-natural-sidebar text-white py-4 rounded-2xl font-bold shadow-lg shadow-natural-sidebar/10 hover:bg-opacity-90 transition-all flex items-center justify-center gap-2 group"
+                      className="flex-[2] bg-natural-sidebar text-white py-4 rounded-2xl font-bold shadow-lg shadow-natural-sidebar/10 hover:bg-opacity-95 transition-all flex items-center justify-center gap-2 group"
                     >
                       <Icons.Save size={20} className="group-hover:scale-110 transition-transform" />
-                      حفظ
+                      حفظ وإغلاق
                     </button>
-                    <button type="button" onClick={() => setView('courses_list')} className="px-8 bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all">
+                    <button 
+                      type="button" 
+                      onClick={(e) => handleSaveCourse(e, true)}
+                      className="flex-[2] bg-natural-accent/10 text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-accent/20 transition-all flex items-center justify-center gap-3 border border-natural-accent/30 group"
+                    >
+                      <Icons.Plus size={20} className="group-hover:rotate-90 transition-transform" />
+                      حفظ وإضافة دورة أخرى
+                    </button>
+                    <button type="button" onClick={() => setView('courses_list')} className="flex-1 bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all">
                       إلغاء
                     </button>
                   </div>
@@ -2119,7 +2223,7 @@ export default function App() {
                                 <td className="p-4">
                                   <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 bg-natural-sidebar/10 rounded-lg flex items-center justify-center text-natural-sidebar text-xs font-bold">
-                                      {trainee.fullName[0]}
+                                      {(trainee.fullName || '')[0]}
                                     </div>
                                     <span className="font-semibold text-sm">{trainee.fullName}</span>
                                   </div>
@@ -2147,8 +2251,20 @@ export default function App() {
                                 </td>
                                 <td className="p-4">
                                   <div className="flex items-center justify-center gap-2">
-                                    <button className="p-1 hover:text-natural-accent transition-colors"><Icons.Edit2 size={16} /></button>
-                                    <button className="p-1 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
+                                    <button 
+                                      onClick={() => setEditingTrainee(trainee)}
+                                      className="p-1 hover:text-natural-accent transition-colors"
+                                      title="تعديل"
+                                    >
+                                      <Icons.Edit2 size={16} />
+                                    </button>
+                                    <button 
+                                      onClick={() => setTraineeToDelete(trainee)}
+                                      className="p-1 hover:text-red-500 transition-colors"
+                                      title="حذف"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
                                   </div>
                                 </td>
                               </tr>
@@ -2275,16 +2391,24 @@ export default function App() {
                     ></textarea>
                   </div>
 
-                  <div className="pt-4 flex flex-col md:flex-row gap-4">
+                   <div className="pt-4 flex flex-col md:flex-row gap-4">
                     <button 
                       type="button" 
                       onClick={(e) => handleRegisterTrainee(e, false)}
-                      className="flex-[2] bg-natural-sidebar text-white py-4 rounded-2xl font-bold shadow-lg shadow-natural-sidebar/10 hover:bg-opacity-90 transition-all flex items-center justify-center gap-2 group"
+                      className="flex-[2] bg-natural-sidebar text-white py-4 rounded-2xl font-bold shadow-lg shadow-natural-sidebar/10 hover:bg-opacity-95 transition-all flex items-center justify-center gap-2 group"
                     >
                       <Icons.Save size={20} className="group-hover:scale-110 transition-transform" />
-                      حفظ
+                      حفظ البيانات
                     </button>
-                    <button type="button" onClick={() => setView('courses_trainees')} className="px-8 bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all">
+                    <button 
+                      type="button" 
+                      onClick={(e) => handleRegisterTrainee(e, true)}
+                      className="flex-[2] bg-natural-accent/10 text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-accent/20 transition-all flex items-center justify-center gap-3 border border-natural-accent/30 group"
+                    >
+                      <Icons.UserPlus size={20} className="group-hover:rotate-12 transition-transform" />
+                      حفظ وإضافة متدرب آخر
+                    </button>
+                    <button type="button" onClick={() => setView('courses_trainees')} className="flex-1 bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all">
                       إلغاء
                     </button>
                   </div>
@@ -2957,7 +3081,7 @@ export default function App() {
                     <div key={member.id} className="p-4 flex items-center justify-between hover:bg-natural-bg/50 transition-colors group">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-white border border-natural-border rounded-xl flex items-center justify-center text-natural-accent font-bold shadow-sm">
-                          {member.name[0]}
+                          {(member.name || '')[0]}
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
@@ -3196,7 +3320,7 @@ export default function App() {
                         <td className="p-4">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 bg-natural-accent/10 rounded-lg flex items-center justify-center text-natural-accent text-xs font-bold">
-                              {member.name[0]}
+                              {(member.name || '')[0]}
                             </div>
                             <span className="font-medium text-sm text-natural-primary">{member.name}</span>
                           </div>
@@ -3276,14 +3400,18 @@ export default function App() {
                         <td className="p-4">
                           <div className="flex items-center gap-2">
                             <button 
-                              onClick={() => deleteMember(member.id)}
+                              onClick={() => setMemberToDelete(member)}
                               className="text-natural-secondary hover:text-red-500 transition-colors p-1"
                               title="حذف"
                             >
                               <Trash2 size={18} />
                             </button>
-                            <button className="text-natural-secondary hover:text-natural-accent transition-colors p-1">
-                              <ChevronRight size={18} />
+                            <button 
+                              onClick={() => setEditingMember(member)}
+                              className="text-natural-secondary hover:text-natural-accent transition-colors p-1"
+                              title="تعديل"
+                            >
+                              <Icons.Edit3 size={18} />
                             </button>
                           </div>
                         </td>
@@ -3866,7 +3994,7 @@ export default function App() {
                         <div key={member.id} className="p-6 flex items-center justify-between hover:bg-natural-bg/30 transition-colors">
                           <div className="flex items-center gap-4">
                             <div className="w-12 h-12 bg-natural-accent/10 rounded-xl flex items-center justify-center text-natural-accent font-bold">
-                              {member.name[0]}
+                              {(member.name || '')[0]}
                             </div>
                             <div>
                               <p className="font-bold text-natural-primary">{member.name}</p>
@@ -3925,7 +4053,7 @@ export default function App() {
                               <td className="p-4">
                                 <div className="flex items-center gap-3">
                                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${isExpired ? 'bg-natural-accent/10 text-natural-accent' : 'bg-natural-success/10 text-natural-success'}`}>
-                                    {member.name[0]}
+                                    {(member.name || '')[0]}
                                   </div>
                                   <span className="font-medium text-sm text-natural-primary">{member.name}</span>
                                 </div>
@@ -4233,6 +4361,356 @@ export default function App() {
                     </button>
                     <button 
                       onClick={() => setDeleteConfirmId(null)}
+                      className="w-full bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Edit Trainee Modal */}
+          <AnimatePresence>
+            {editingTrainee && (
+              <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-natural-sidebar/40 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl border border-natural-border overflow-hidden"
+                  dir="rtl"
+                >
+                  <div className="bg-natural-sidebar p-6 text-white flex justify-between items-center">
+                    <h3 className="text-xl font-bold">تعديل بيانات المتدرب</h3>
+                    <button onClick={() => setEditingTrainee(null)}><Icons.X size={24} /></button>
+                  </div>
+                  <form onSubmit={handleUpdateTrainee} className="p-8 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-natural-secondary px-1">الاسم الثلاثي</label>
+                        <input 
+                          required
+                          type="text" 
+                          value={editingTrainee.fullName}
+                          onChange={e => setEditingTrainee({...editingTrainee, fullName: e.target.value})}
+                          className="w-full px-4 py-2.5 rounded-xl border border-natural-border focus:border-natural-accent outline-none text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-natural-secondary px-1">رقم الجوال</label>
+                        <input 
+                          type="tel" 
+                          value={editingTrainee.motherPhone}
+                          onChange={e => setEditingTrainee({...editingTrainee, motherPhone: e.target.value})}
+                          className="w-full px-4 py-2.5 rounded-xl border border-natural-border focus:border-natural-accent outline-none text-sm font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-natural-secondary px-1">المدة</label>
+                        <input 
+                          type="text" 
+                          value={editingTrainee.duration}
+                          onChange={e => setEditingTrainee({...editingTrainee, duration: e.target.value})}
+                          className="w-full px-4 py-2.5 rounded-xl border border-natural-border focus:border-natural-accent outline-none text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-natural-secondary px-1">المبلغ</label>
+                        <input 
+                          type="number" 
+                          value={editingTrainee.amount}
+                          onChange={e => setEditingTrainee({...editingTrainee, amount: e.target.value})}
+                          className="w-full px-4 py-2.5 rounded-xl border border-natural-border focus:border-natural-accent outline-none text-sm font-bold"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-natural-secondary px-1">طريقة الدفع</label>
+                        <select 
+                          value={editingTrainee.paymentMethod}
+                          onChange={e => setEditingTrainee({...editingTrainee, paymentMethod: e.target.value as any})}
+                          className="w-full px-4 py-2.5 rounded-xl border border-natural-border focus:border-natural-accent outline-none text-sm"
+                        >
+                          <option value="كاش">كاش</option>
+                          <option value="تحويل">تحويل</option>
+                          <option value="لم يتم الدفع">لم يتم الدفع</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-natural-secondary px-1">تاريخ التسجيل</label>
+                        <input 
+                          type="date" 
+                          value={editingTrainee.date}
+                          onChange={e => setEditingTrainee({...editingTrainee, date: e.target.value})}
+                          className="w-full px-4 py-2.5 rounded-xl border border-natural-border focus:border-natural-accent outline-none text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-natural-secondary px-1">ملاحظات</label>
+                      <textarea 
+                        value={editingTrainee.notes}
+                        onChange={e => setEditingTrainee({...editingTrainee, notes: e.target.value})}
+                        className="w-full px-4 py-2.5 rounded-xl border border-natural-border focus:border-natural-accent outline-none text-sm"
+                        rows={2}
+                      />
+                    </div>
+                    <button 
+                      type="submit"
+                      className="w-full bg-natural-accent text-white py-4 rounded-2xl font-bold hover:bg-opacity-90 transition-all shadow-lg shadow-natural-accent/20 mt-4"
+                    >
+                      حفظ التعديلات
+                    </button>
+                  </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Delete Trainee Confirmation Modal */}
+          <AnimatePresence>
+            {traineeToDelete && (
+              <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-red-900/20 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-white w-full max-sm rounded-[32px] p-8 shadow-2xl border border-red-100 text-center"
+                  dir="rtl"
+                >
+                  <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Trash2 size={40} />
+                  </div>
+                  <h3 className="text-xl font-bold text-natural-sidebar mb-2">تأكيد حذف المتدرب</h3>
+                  <p className="text-natural-secondary mb-8">هل أنت متأكد من حذف المتدرب <span className="font-bold text-red-500">{traineeToDelete.fullName}</span>؟</p>
+                  
+                  <div className="flex flex-col gap-3">
+                    <button 
+                      onClick={() => {
+                        deleteTrainee(traineeToDelete);
+                        setTraineeToDelete(null);
+                      }}
+                      className="w-full bg-red-500 text-white py-4 rounded-2xl font-bold hover:bg-red-600 transition-all shadow-lg shadow-red-500/20"
+                    >
+                      نعم، احذف المتدرب
+                    </button>
+                    <button 
+                      onClick={() => setTraineeToDelete(null)}
+                      className="w-full bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Edit Member Modal */}
+          <AnimatePresence>
+            {editingMember && (
+              <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-natural-sidebar/40 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl border border-natural-border overflow-hidden flex flex-col max-h-[90vh]"
+                  dir="rtl"
+                >
+                  <div className="bg-natural-sidebar p-6 text-white flex justify-between items-center shrink-0">
+                    <h3 className="text-xl font-bold font-black">تعديل بيانات المشترك</h3>
+                    <button onClick={() => setEditingMember(null)} className="hover:rotate-90 transition-all"><Icons.X size={24} /></button>
+                  </div>
+                  <form onSubmit={handleUpdateMember} className="p-8 space-y-6 overflow-y-auto custom-scrollbar">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-natural-sidebar px-1">اسم المشترك</label>
+                        <input 
+                          required
+                          type="text" 
+                          value={editingMember.name}
+                          onChange={e => setEditingMember({...editingMember, name: e.target.value})}
+                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-natural-sidebar px-1">رقم الهاتف</label>
+                        <input 
+                          type="tel" 
+                          value={editingMember.phone}
+                          onChange={e => setEditingMember({...editingMember, phone: e.target.value})}
+                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all font-mono"
+                        />
+                      </div>
+                    </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-natural-sidebar px-1">تاريخ البدء</label>
+                          <input 
+                            required
+                            type="date" 
+                            value={editingMember.startDate}
+                            onChange={e => {
+                              const start = e.target.value;
+                              let newEnd = editingMember.endDate;
+                              if (start && editingMember.subscriptionDays) {
+                                try {
+                                  const d = new Date(start);
+                                  d.setDate(d.getDate() + (editingMember.subscriptionDays || 0));
+                                  if (!isNaN(d.getTime())) {
+                                    newEnd = d.toISOString().split('T')[0];
+                                  }
+                                } catch(err) {}
+                              }
+                              setEditingMember({...editingMember, startDate: start, endDate: newEnd});
+                            }}
+                            className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-natural-sidebar px-1">مدة الاشتراك (أيام)</label>
+                          <input 
+                            type="number" 
+                            value={editingMember.subscriptionDays || ''}
+                            onChange={e => {
+                              const days = parseInt(e.target.value) || 0;
+                              let newEnd = editingMember.endDate;
+                              if (editingMember.startDate) {
+                                try {
+                                  const d = new Date(editingMember.startDate);
+                                  d.setDate(d.getDate() + days);
+                                  if (!isNaN(d.getTime())) {
+                                    newEnd = d.toISOString().split('T')[0];
+                                  }
+                                } catch(err) {}
+                              }
+                              setEditingMember({...editingMember, subscriptionDays: days, endDate: newEnd});
+                            }}
+                            className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all font-bold"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-natural-sidebar px-1">تاريخ الانتهاء</label>
+                        <input 
+                          required
+                          type="date" 
+                          value={editingMember.endDate}
+                          onChange={e => setEditingMember({...editingMember, endDate: e.target.value})}
+                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all"
+                        />
+                      </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-natural-sidebar px-1">الصف</label>
+                        <input 
+                          type="text" 
+                          value={editingMember.grade}
+                          onChange={e => setEditingMember({...editingMember, grade: e.target.value})}
+                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-natural-sidebar px-1">المعلمة</label>
+                        <input 
+                          list="teachersList"
+                          value={editingMember.teacherName}
+                          onChange={e => setEditingMember({...editingMember, teacherName: e.target.value})}
+                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-natural-sidebar px-1">رصيد التعويض</label>
+                        <input 
+                          type="number" 
+                          value={editingMember.compensationSessions}
+                          onChange={e => setEditingMember({...editingMember, compensationSessions: Number(e.target.value)})}
+                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-natural-sidebar px-1">السعر</label>
+                        <input 
+                          type="number" 
+                          value={editingMember.price}
+                          onChange={e => setEditingMember({...editingMember, price: e.target.value})}
+                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all font-bold"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-natural-sidebar px-1">المبلغ المدفوع</label>
+                        <input 
+                          type="number" 
+                          value={editingMember.paidAmount}
+                          onChange={e => setEditingMember({...editingMember, paidAmount: e.target.value})}
+                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all font-bold text-natural-success"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-natural-sidebar px-1">الحالة</label>
+                        <select 
+                          value={editingMember.status}
+                          onChange={e => setEditingMember({...editingMember, status: e.target.value as any})}
+                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all"
+                        >
+                          <option value="active">نشط</option>
+                          <option value="expired">منتهي</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <button 
+                      type="submit"
+                      className="w-full bg-natural-sidebar text-white py-4 rounded-2xl font-bold hover:bg-natural-accent transition-all shadow-xl shadow-natural-sidebar/20 mt-4"
+                    >
+                      حفظ التعديلات
+                    </button>
+                  </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Delete Member Confirmation Modal */}
+          <AnimatePresence>
+            {memberToDelete && (
+              <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-red-900/20 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl border border-red-100 text-center"
+                  dir="rtl"
+                >
+                  <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Trash2 size={40} />
+                  </div>
+                  <h3 className="text-xl font-bold text-natural-sidebar mb-2">تأكيد حذف المشترك</h3>
+                  <p className="text-natural-secondary mb-8">هل أنت متأكد من حذف المشترك <span className="font-bold text-red-500">{memberToDelete.name}</span>؟</p>
+                  
+                  <div className="flex flex-col gap-3">
+                    <button 
+                      onClick={async () => {
+                        await deleteMember(memberToDelete.id);
+                        setMemberToDelete(null);
+                      }}
+                      className="w-full bg-red-500 text-white py-4 rounded-2xl font-bold hover:bg-red-600 transition-all shadow-lg shadow-red-500/20"
+                    >
+                      نعم، احذف المشترك
+                    </button>
+                    <button 
+                      onClick={() => setMemberToDelete(null)}
                       className="w-full bg-natural-bg text-natural-sidebar py-4 rounded-2xl font-bold hover:bg-natural-border transition-all"
                     >
                       إلغاء
@@ -4880,7 +5358,7 @@ function SectionCard({ title, children, badge, icon: Icon }: any) {
   );
 }
 
-function TeacherAttendanceView({ teachers, attendance, markAttendance, deleteAttendance, onAddTeacher }: any) {
+function TeacherAttendanceView({ teachers, attendance, markAttendance, deleteTeacherAttendance, onAddTeacher }: any) {
   const today = new Date().toISOString().split('T')[0];
   const formattedDate = new Date().toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const [newTeacherInputLocal, setNewTeacherInputLocal] = useState('');
@@ -4948,7 +5426,7 @@ function TeacherAttendanceView({ teachers, attendance, markAttendance, deleteAtt
                         </div>
                         {status && (
                           <button
-                            onClick={() => deleteAttendance(teacher)}
+                            onClick={() => deleteTeacherAttendance(teacher)}
                             className="text-[10px] text-red-400 hover:text-red-600 font-bold transition-colors flex items-center gap-1"
                           >
                             <Trash2 size={10} />
@@ -5025,7 +5503,7 @@ function TeacherAttendanceView({ teachers, attendance, markAttendance, deleteAtt
                   </td>
                   <td className="p-4 text-left">
                     <button
-                      onClick={() => deleteAttendance(record.teacherName, record.date)}
+                      onClick={() => deleteTeacherAttendance(record.teacherName, record.date)}
                       className="text-red-400 hover:text-red-600 p-1 transition-colors"
                       title="حذف السجل"
                     >
