@@ -123,8 +123,9 @@ export default function App() {
   const location = useLocation();
   const view = (location.pathname.substring(1) as View) || 'dashboard';
   
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  // Auth State (Simplified as auth is being removed)
+  const [user, setUser] = useState<User | null>({ uid: 'anonymous', email: 'guest@example.com' } as User);
+  const [authLoading, setAuthLoading] = useState(false);
   const [showTotalAmount, setShowTotalAmount] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
@@ -143,13 +144,9 @@ export default function App() {
     setIsMobileMenuOpen(false);
   };
 
-  // Auth Listener
+  // Auth Listener (Disabled to allow direct access)
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setAuthLoading(false);
-    });
-    return () => unsubscribe();
+    // onAuthStateChanged disabled
   }, []);
 
   const showNotif = (message: string, type: 'success' | 'error' = 'success') => {
@@ -191,7 +188,7 @@ export default function App() {
 
   // Data Listeners
   useEffect(() => {
-    if (!user) return;
+    // Removed if (!user) return; to allow anonymous data loading if rules permit or for development
 
     const unsubMembers = onSnapshot(collection(db, 'members'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Member));
