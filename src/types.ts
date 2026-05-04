@@ -52,6 +52,7 @@ export interface Course {
   isSettled?: boolean;
   extraIncome?: string;
   extraExpenses?: string;
+  icon?: string;
 }
 
 export interface Trainee {

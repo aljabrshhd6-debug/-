@@ -12,6 +12,12 @@ import {
   Users, 
   CheckSquare, 
   History, 
+  Database,
+  Calculator,
+  TrendingUp,
+  Table,
+  FileText,
+  ClipboardCheck,
   AlertCircle, 
   Calendar,
   Plus,
@@ -185,6 +191,8 @@ export default function App() {
 
   // Data Listeners
   useEffect(() => {
+    if (!user) return;
+
     const unsubMembers = onSnapshot(collection(db, 'members'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Member));
       setMembers(data.sort((a, b) => (b.id > a.id ? 1 : -1)));
@@ -244,7 +252,7 @@ export default function App() {
       unsubSettings();
       unsubTeacherAttendance();
     };
-  }, []);
+  }, [user]);
 
   const [newCourse, setNewCourse] = useState<Partial<Course>>({
     title: '',
@@ -259,9 +267,11 @@ export default function App() {
     cost: '',
     associationPercentage: '30',
     extraIncome: '',
-    extraExpenses: ''
+    extraExpenses: '',
+    icon: 'BookOpen'
   });
 
+  const [selectedReportCourse, setSelectedReportCourse] = useState<Course | null>(null);
   const [selectedAccountingCourseId, setSelectedAccountingCourseId] = useState<string | null>(null);
 
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -270,6 +280,15 @@ export default function App() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [detailsCourse, setDetailsCourse] = useState<Course | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [searchMember, setSearchMember] = useState('');
+  const [courseFilter, setCourseFilter] = useState<'all' | 'active' | 'upcoming' | 'completed'>('all');
+
+  const filteredCourses = courses.filter(c => {
+    const matchesSearch = c.title.toLowerCase().includes(searchMember.toLowerCase()) ||
+                         c.instructor.toLowerCase().includes(searchMember.toLowerCase());
+    if (courseFilter === 'all') return matchesSearch;
+    return matchesSearch && c.status === courseFilter;
+  });
 
   const [newTrainee, setNewTrainee] = useState<Partial<Trainee>>({
     fullName: '',
@@ -737,6 +756,8 @@ export default function App() {
     { id: 'teacher_attendance', label: 'تحضير المعلمين', icon: UserCheck },
     { id: 'compensation', label: 'التعويض', icon: RefreshCw },
     { id: 'expiry', label: 'انتهاء المدة', icon: Clock },
+    { id: 'archives', label: 'الأرشيف والسجلات', icon: History },
+    { id: 'database', label: 'قاعدة البيانات', icon: Database },
     { id: 'about', label: 'عن الجمعية', icon: Heart },
     { id: 'settings', label: 'الإعدادات', icon: SettingsIcon },
   ];
@@ -790,13 +811,39 @@ export default function App() {
     }
   };
 
-  if (false && authLoading) {
+  if (authLoading) {
     return (
       <div className="h-screen flex items-center justify-center bg-natural-bg" dir="rtl">
         <div className="text-center">
           <RefreshCw className="animate-spin text-natural-accent mx-auto mb-4" size={48} />
           <p className="text-natural-sidebar font-bold">جاري تحميل النظام...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-natural-bg p-4" dir="rtl">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-white p-10 rounded-[3rem] shadow-2xl border border-natural-border text-center max-w-md w-full"
+        >
+          <div className="w-24 h-24 bg-natural-accent/10 rounded-[2rem] flex items-center justify-center mx-auto mb-6 text-natural-accent">
+            <Lock size={48} />
+          </div>
+          <h1 className="text-3xl font-black text-natural-sidebar mb-2">تسجيل الدخول</h1>
+          <p className="text-natural-secondary font-medium mb-10">يرجى تسجيل الدخول للوصول إلى نظام إدارة النادي</p>
+          
+          <button
+            onClick={() => signInWithGoogle()}
+            className="w-full bg-natural-sidebar text-white py-5 rounded-[2rem] font-black hover:bg-natural-accent transition-all shadow-xl shadow-natural-sidebar/20 flex items-center justify-center gap-3"
+          >
+            <LogIn size={20} />
+            الدخول باستخدام جوجل
+          </button>
+        </motion.div>
       </div>
     );
   }
@@ -913,6 +960,16 @@ export default function App() {
               <span className="text-xs font-bold text-natural-accent">{new Date().toLocaleDateString('ar-SA')} م</span>
             </div>
           </div>
+          
+          {user && (
+            <button
+              onClick={() => logout()}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white/70 hover:bg-red-500/10 hover:text-red-400 transition-all border border-transparent hover:border-red-500/20"
+            >
+              <LogOut size={18} />
+              <span className="text-sm font-bold">تسجيل الخروج</span>
+            </button>
+          )}
         </div>
       </aside>
 
@@ -1722,19 +1779,59 @@ export default function App() {
                   </button>
                 </div>
 
+                <div className="flex flex-col md:flex-row gap-4 items-center justify-between mb-8">
+                  <div className="flex items-center gap-2 bg-white p-1 rounded-2xl border border-natural-border shadow-sm overflow-x-auto max-w-full">
+                    {(['all', 'active', 'upcoming', 'completed'] as const).map(f => (
+                      <button
+                        key={f}
+                        onClick={() => setCourseFilter(f)}
+                        className={`px-6 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${
+                          courseFilter === f ? 'bg-natural-sidebar text-white shadow-md' : 'text-natural-secondary hover:bg-natural-bg'
+                        }`}
+                      >
+                        {f === 'all' ? 'الكل' : f === 'active' ? 'نشطة' : f === 'upcoming' ? 'قادمة' : 'مكتملة'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="relative w-full md:w-80">
+                    <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-natural-secondary" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="ابحث عن دورة أو مدربة..." 
+                      className="w-full pr-12 pl-4 py-3 bg-white border border-natural-border rounded-2xl focus:outline-none focus:ring-2 focus:ring-natural-accent focus:border-transparent transition-all shadow-sm"
+                      value={searchMember}
+                      onChange={(e) => setSearchMember(e.target.value)}
+                    />
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {courses.map(course => (
+                  {filteredCourses.map(course => (
                     <div key={course.id} className="bg-white rounded-3xl border border-natural-border overflow-hidden shadow-sm hover:shadow-xl transition-all group">
                       <div className="p-6">
                         <div className="flex justify-between items-start mb-4">
-                          <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                            course.status === 'active' ? 'bg-natural-success/10 text-natural-success' :
-                            course.status === 'upcoming' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'
-                          }`}>
-                            {course.status === 'active' ? 'نشطة حالياً' : 
-                             course.status === 'upcoming' ? 'قادمة قريباً' : 'مكتملة'}
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-natural-accent/10 rounded-2xl flex items-center justify-center text-natural-accent">
+                               <DynamicIcon name={course.icon || 'BookOpen'} size={20} />
+                            </div>
+                            <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              course.status === 'active' ? 'bg-natural-success/10 text-natural-success' :
+                              course.status === 'upcoming' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'
+                            }`}>
+                              {course.status === 'active' ? 'نشطة حالياً' : 
+                               course.status === 'upcoming' ? 'قادمة قريباً' : 'مكتملة'}
+                            </div>
                           </div>
-                          <span className="text-lg font-bold text-natural-accent">{course.price} ر.س</span>
+                          <div className="flex flex-col items-end">
+                            <span className="text-lg font-bold text-natural-accent">{course.price} ر.س</span>
+                            <button 
+                              onClick={() => setSelectedReportCourse(course)}
+                              className="mt-2 p-2 bg-natural-sidebar/5 rounded-xl text-natural-sidebar hover:bg-natural-accent hover:text-white transition-all shadow-sm"
+                              title="عرض جدول الإحصائيات"
+                            >
+                              <Icons.Table size={16} />
+                            </button>
+                          </div>
                         </div>
                         <h3 
                           onClick={() => setDetailsCourse(course)}
@@ -1883,6 +1980,23 @@ export default function App() {
                          placeholder="اسبوع - يوم" 
                          className="w-full px-4 py-3 rounded-xl border border-natural-border focus:border-natural-accent outline-none transition-all" 
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-natural-sidebar block px-1">أيقونة الدورة</label>
+                      <div className="flex flex-wrap gap-2 p-2 bg-natural-bg rounded-xl border border-natural-border min-h-[46px]">
+                        {['BookOpen', 'Palette', 'Smile', 'Star', 'Heart', 'Zap', 'Coffee', 'Globe', 'Award', 'Camera'].map(iconName => (
+                          <button
+                            key={iconName}
+                            type="button"
+                            onClick={() => setNewCourse({...newCourse, icon: iconName})}
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                              newCourse.icon === iconName ? 'bg-natural-accent text-white shadow-md' : 'text-natural-secondary hover:bg-natural-border'
+                            }`}
+                          >
+                            <DynamicIcon name={iconName} size={16} />
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -2503,6 +2617,53 @@ export default function App() {
                                     </tr>
                                   </tbody>
                                 </table>
+                              </div>
+                              
+                              <div className="p-5 bg-natural-sidebar/5 border-t border-natural-sidebar/5">
+                                <h5 className="text-[11px] font-black text-natural-sidebar mb-3 flex items-center gap-2">
+                                  <Icons.Calculator size={14} className="text-natural-accent" />
+                                  الملخص المالي التفصيلي
+                                </h5>
+                                <div className="overflow-x-auto rounded-xl border border-natural-sidebar/10">
+                                  <table className="w-full text-[10px] font-bold text-natural-sidebar">
+                                    <thead className="bg-natural-sidebar/10">
+                                      <tr>
+                                        <th className="p-2 border-l border-natural-sidebar/5">العدد</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5">السعر</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5">الإجمالي</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5">الخصم</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5">الإجمالي النهائي</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5">إجمالي المصاريف</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5">إجمالي الربح</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5">صافي الربح</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5 text-natural-secondary">للجمعية %</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5">المستحق للجمعية</th>
+                                        <th className="p-2 border-l border-natural-sidebar/5 text-natural-secondary">للمدربة %</th>
+                                        <th className="p-2">المستحق للمدربة</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="bg-white">
+                                      <tr>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center">{ct.length}</td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center">{courseBasePrice.toLocaleString()}</td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center">{potentialTotal.toLocaleString()}</td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center text-red-500">{totalDiscount.toLocaleString()}</td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center font-black">{traineeInc.toLocaleString()}</td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center text-red-600">{totalExp.toLocaleString()}</td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center text-natural-accent">{(finalIncome - (traineeInc - potentialTotal < 0 ? 0 : 0)).toLocaleString()}</td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center font-black text-green-600">{net.toLocaleString()}</td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center text-natural-sidebar/60">{course.associationPercentage || '30'}%</td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center font-black">
+                                          {(net > 0 ? (net * (parseFloat(course.associationPercentage || '30') / 100)) : 0).toLocaleString()}
+                                        </td>
+                                        <td className="p-2 border-l border-natural-sidebar/5 text-center text-natural-sidebar/60">{100 - parseFloat(course.associationPercentage || '30')}%</td>
+                                        <td className="p-2 text-center font-black">
+                                          {(net > 0 ? (net * ((100 - parseFloat(course.associationPercentage || '30')) / 100)) : 0).toLocaleString()}
+                                        </td>
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                </div>
                               </div>
                               
                               {/* Statistical Indicators Row */}
@@ -3247,6 +3408,306 @@ export default function App() {
             </div>
           )}
 
+            {view === 'database' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-8 pb-12"
+              >
+                <div className="flex items-center gap-4 mb-8">
+                  <div className="w-12 h-12 bg-natural-sidebar text-white rounded-3xl flex items-center justify-center shadow-lg shadow-natural-sidebar/20">
+                    <Database size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-3xl font-black text-natural-sidebar">مركز البيانات الشامل</h2>
+                    <p className="text-natural-secondary font-medium">استعراض كافة السجلات المخزنة في قاعدة البيانات</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-8">
+                  <SectionCard title="جدول المشتركين العام" icon={Users}>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px] font-bold text-natural-sidebar text-right">
+                        <thead className="bg-natural-bg/50">
+                          <tr>
+                            <th className="p-3 border-l border-natural-border">الاسم</th>
+                            <th className="p-3 border-l border-natural-border">الجوال</th>
+                            <th className="p-3 border-l border-natural-border">التاريخ</th>
+                            <th className="p-3 border-l border-natural-border">الحالة</th>
+                            <th className="p-3 border-l border-natural-border">المعلمة</th>
+                            <th className="p-3 border-l border-natural-border">السعر</th>
+                            <th className="p-3">ملاحظات</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-natural-border">
+                          {members.map(m => (
+                            <tr key={m.id} className="hover:bg-natural-bg/5 transition-colors">
+                              <td className="p-3 border-l border-natural-border font-black">{m.name}</td>
+                              <td className="p-3 border-l border-natural-border text-natural-secondary">{m.phone}</td>
+                              <td className="p-3 border-l border-natural-border">{m.startDate} - {m.endDate}</td>
+                              <td className="p-3 border-l border-natural-border">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] ${
+                                  m.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
+                                }`}>
+                                  {m.status === 'active' ? 'نشط' : 'منتهي'}
+                                </span>
+                              </td>
+                              <td className="p-3 border-l border-natural-border">{m.teacherName}</td>
+                              <td className="p-3 border-l border-natural-border font-black">{m.price} ر.س</td>
+                              <td className="p-3 text-[9px] text-natural-secondary truncate max-w-[150px]">{m.notes}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard title="جدول الدورات التدريبية" icon={BookOpen}>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px] font-bold text-natural-sidebar text-right">
+                        <thead className="bg-natural-bg/50">
+                          <tr>
+                            <th className="p-3 border-l border-natural-border">عنوان الدورة</th>
+                            <th className="p-3 border-l border-natural-border">المدربة</th>
+                            <th className="p-3 border-l border-natural-border">الحالة</th>
+                            <th className="p-3 border-l border-natural-border">السعر</th>
+                            <th className="p-3 border-l border-natural-border">التكلفة</th>
+                            <th className="p-3 border-l border-natural-border">المسجلين</th>
+                            <th className="p-3">نسبة الجمعية</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-natural-border">
+                          {courses.map(c => (
+                            <tr key={c.id} className="hover:bg-natural-bg/5 transition-colors">
+                              <td className="p-3 border-l border-natural-border font-black">{c.title}</td>
+                              <td className="p-3 border-l border-natural-border">{c.instructor}</td>
+                              <td className="p-3 border-l border-natural-border">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] ${
+                                  c.status === 'active' ? 'bg-green-50 text-green-600' : 
+                                  c.status === 'upcoming' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'
+                                }`}>
+                                  {c.status === 'active' ? 'نشطة' : c.status === 'upcoming' ? 'قادمة' : 'منتهية'}
+                                </span>
+                              </td>
+                              <td className="p-3 border-l border-natural-border font-black">{c.price} ر.س</td>
+                              <td className="p-3 border-l border-natural-border text-red-500">{c.cost} ر.س</td>
+                              <td className="p-3 border-l border-natural-border text-center">
+                                {trainees.filter(t => t.courseId === c.id || t.courseId === c.title).length} / {c.capacity}
+                              </td>
+                              <td className="p-3 text-center">{c.associationPercentage || '30'}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard title="سجل المتدربين التفصيلي" icon={Users}>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px] font-bold text-natural-sidebar text-right">
+                        <thead className="bg-natural-bg/50">
+                          <tr>
+                            <th className="p-3 border-l border-natural-border">اسم المتدرب</th>
+                            <th className="p-3 border-l border-natural-border">الدورة</th>
+                            <th className="p-3 border-l border-natural-border">المبلغ المدفوع</th>
+                            <th className="p-3 border-l border-natural-border">طريقة الدفع</th>
+                            <th className="p-3 border-l border-natural-border">التاريخ</th>
+                            <th className="p-3">الجوال</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-natural-border">
+                          {trainees.map(t => (
+                            <tr key={t.id} className="hover:bg-natural-bg/5 transition-colors">
+                              <td className="p-3 border-l border-natural-border font-black">{t.fullName}</td>
+                              <td className="p-3 border-l border-natural-border">{t.courseId}</td>
+                              <td className="p-3 border-l border-natural-border text-green-600">{t.amount} ر.س</td>
+                              <td className="p-3 border-l border-natural-border">{t.paymentMethod}</td>
+                              <td className="p-3 border-l border-natural-border">{t.date}</td>
+                              <td className="p-3 text-natural-secondary">{t.motherPhone}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </SectionCard>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                     <SectionCard title="تحضير الطلاب" icon={ClipboardCheck}>
+                        <div className="overflow-y-auto max-h-[400px]">
+                          <table className="w-full text-[10px] font-bold text-right">
+                             <thead className="bg-natural-bg sticky top-0">
+                               <tr className="border-b border-natural-border">
+                                 <th className="p-2">التاريخ</th>
+                                 <th className="p-2">الحالة</th>
+                               </tr>
+                             </thead>
+                             <tbody>
+                               {attendance.slice(0, 100).map(a => (
+                                 <tr key={a.id} className="border-b border-natural-border/10">
+                                   <td className="p-2">{a.date}</td>
+                                   <td className="p-2">
+                                     <span className={`px-2 py-0.5 rounded-full text-[8px] ${
+                                       a.status === 'present' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
+                                     }`}>
+                                       {a.status === 'present' ? 'حاضر' : 'غائب'}
+                                     </span>
+                                   </td>
+                                 </tr>
+                               ))}
+                             </tbody>
+                          </table>
+                        </div>
+                     </SectionCard>
+
+                     <SectionCard title="تحضير المعلمين" icon={UserCheck}>
+                        <div className="overflow-y-auto max-h-[400px]">
+                          <table className="w-full text-[10px] font-bold text-right">
+                             <thead className="bg-natural-bg sticky top-0">
+                               <tr className="border-b border-natural-border">
+                                 <th className="p-2">المعلمة</th>
+                                 <th className="p-2">التاريخ</th>
+                                 <th className="p-2">الحالة</th>
+                               </tr>
+                             </thead>
+                             <tbody>
+                               {teacherAttendance.slice(0, 100).map(ta => (
+                                 <tr key={ta.id} className="border-b border-natural-border/10">
+                                   <td className="p-2 font-black">{ta.teacherName}</td>
+                                   <td className="p-2">{ta.date}</td>
+                                   <td className="p-2">
+                                     <span className={`px-2 py-0.5 rounded-full text-[8px] ${
+                                       ta.status === 'حاضر' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
+                                     }`}>
+                                       {ta.status}
+                                     </span>
+                                   </td>
+                                 </tr>
+                               ))}
+                             </tbody>
+                          </table>
+                        </div>
+                     </SectionCard>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {view === 'archives' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-8 pb-12"
+              >
+                <div className="flex items-center gap-4 mb-8">
+                  <div className="w-12 h-12 bg-natural-sidebar text-white rounded-3xl flex items-center justify-center shadow-lg shadow-natural-sidebar/20">
+                    <History size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-3xl font-black text-natural-sidebar">الأرشيف والسجلات</h2>
+                    <p className="text-natural-secondary font-medium">سجلات الدورات المكتملة والمشتركين السابقين</p>
+                  </div>
+                </div>
+
+                <SectionCard title="أرشيف الدورات التدريبية" icon={BookOpen}>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[12px] font-bold text-natural-sidebar" dir="rtl">
+                      <thead className="bg-natural-bg/50">
+                        <tr className="border-b border-natural-sidebar/5">
+                          <th className="p-4 text-right">الدورة</th>
+                          <th className="p-4 text-center">المدربة</th>
+                          <th className="p-4 text-center">المتدربين</th>
+                          <th className="p-4 text-center">إجمالي الدخل</th>
+                          <th className="p-4 text-center">صافي الربح</th>
+                          <th className="p-4 text-center">التاريخ</th>
+                          <th className="p-4 text-center">الإجراء</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-natural-sidebar/5">
+                        {courses.filter(c => c.status === 'completed').length === 0 ? (
+                          <tr><td colSpan={7} className="p-8 text-center text-natural-secondary italic text-xs">لا يوجد دورات مكتملة حالياً</td></tr>
+                        ) : (
+                          courses.filter(c => c.status === 'completed').map(c => {
+                            const ct = trainees.filter(t => t.courseId === c.id || t.courseId === c.title);
+                            const traineeInc = ct.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+                            const extraInc = parseFloat(c.extraIncome || '0') || 0;
+                            const finalIncome = traineeInc + extraInc;
+                            const totalExp = (parseFloat(c.cost || '0') || 0) + (parseFloat(c.extraExpenses || '0') || 0);
+                            const net = finalIncome - totalExp;
+
+                            return (
+                              <tr key={c.id} className="hover:bg-natural-bg/10 transition-colors">
+                                <td className="p-4 font-black">{c.title}</td>
+                                <td className="p-4 text-center text-natural-secondary">{c.instructor}</td>
+                                <td className="p-4 text-center">{ct.length}</td>
+                                <td className="p-4 text-center text-natural-accent">{finalIncome.toLocaleString()} ر.س</td>
+                                <td className="p-4 text-center font-black text-green-600">{net.toLocaleString()} ر.س</td>
+                                <td className="p-4 text-center text-[10px] text-natural-secondary">{c.startDate}</td>
+                                <td className="p-4 text-center">
+                                  <button 
+                                    onClick={() => setSelectedReportCourse(c)}
+                                    className="p-2 bg-natural-sidebar/5 text-natural-sidebar rounded-xl hover:bg-natural-accent hover:text-white transition-all shadow-sm"
+                                  >
+                                    <Icons.FileText size={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </SectionCard>
+
+                <SectionCard title="سجل المشتركين السابقين" icon={Users}>
+                   <div className="overflow-x-auto">
+                    <table className="w-full text-[12px] font-bold text-natural-sidebar" dir="rtl">
+                      <thead className="bg-natural-bg/50">
+                        <tr className="border-b border-natural-sidebar/5">
+                          <th className="p-4 text-right">المشترك</th>
+                          <th className="p-4 text-center">المعلمة</th>
+                          <th className="p-4 text-center">تاريخ الانتهاء</th>
+                          <th className="p-4 text-center">المبلغ</th>
+                          <th className="p-4 text-center">طريقة الدفع</th>
+                          <th className="p-4 text-center">الإجراء</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-natural-sidebar/5">
+                        {members.filter(m => m.status === 'expired').length === 0 ? (
+                          <tr><td colSpan={6} className="p-8 text-center text-natural-secondary italic text-xs">لا يوجد مشتركين منتهين حالياً</td></tr>
+                        ) : (
+                          members.filter(m => m.status === 'expired').map(m => (
+                            <tr key={m.id} className="hover:bg-natural-bg/10 transition-colors">
+                              <td className="p-4">
+                                <p className="font-black">{m.name}</p>
+                                <p className="text-[10px] text-natural-secondary">{m.phone}</p>
+                              </td>
+                              <td className="p-4 text-center text-natural-secondary">{m.teacherName}</td>
+                              <td className="p-4 text-center text-red-500">{m.endDate}</td>
+                              <td className="p-4 text-center">{m.price} ر.س</td>
+                              <td className="p-4 text-center">
+                                <span className={`px-3 py-1 rounded-full text-[10px] ${m.paymentMethod === 'كاش' ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'}`}>
+                                  {m.paymentMethod}
+                                </span>
+                              </td>
+                              <td className="p-4 text-center">
+                                <button 
+                                  onClick={() => setEditingMemberStats(m)}
+                                  className="p-2 bg-natural-sidebar/5 text-natural-sidebar rounded-xl hover:bg-natural-accent hover:text-white transition-all shadow-sm"
+                                >
+                                  <Icons.BarChart size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </SectionCard>
+              </motion.div>
+            )}
+
             {view === 'about' && (
               <motion.div
                 key="about"
@@ -3617,6 +4078,148 @@ export default function App() {
                   </div>
                 </div>
               </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Course Report Modal */}
+          <AnimatePresence>
+            {selectedReportCourse && (
+              <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-natural-sidebar/50 backdrop-blur-md">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className="bg-white w-full max-w-6xl rounded-[2.5rem] overflow-hidden shadow-2xl border border-natural-border"
+                >
+                  <div className="bg-natural-sidebar p-6 text-white flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-natural-accent">
+                        <DynamicIcon name={selectedReportCourse.icon || 'BookOpen'} size={20} />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-black">التقرير الختامي لدورة: {selectedReportCourse.title}</h3>
+                        <p className="text-[10px] text-white/60 font-bold">هذه البيانات محفوظة بشكل دائم في قاعدة البيانات</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setSelectedReportCourse(null)} 
+                      className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                    >
+                      <Icons.X size={24} />
+                    </button>
+                  </div>
+
+                  <div className="p-8 max-h-[80vh] overflow-y-auto custom-scrollbar" dir="rtl">
+                    {(() => {
+                        const course = selectedReportCourse;
+                        const ct = trainees.filter(t => t.courseId === course.id || t.courseId === course.title);
+                        const courseBasePrice = parseFloat(course.price) || 0;
+                        const traineeInc = ct.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+                        const potentialTotal = ct.length * courseBasePrice;
+                        const totalDiscount = potentialTotal - traineeInc;
+                        const extraInc = parseFloat(course.extraIncome || '0');
+                        const finalIncome = traineeInc + extraInc;
+                        const totalExp = (parseFloat(course.cost) || 0) + (parseFloat(course.extraExpenses || '0'));
+                        const net = finalIncome - totalExp;
+                        const progress = course.capacity > 0 ? (ct.length / course.capacity) * 100 : 0;
+
+                        return (
+                          <div className="space-y-8">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                               <div className="bg-natural-bg/50 p-5 rounded-3xl border border-natural-border">
+                                 <p className="text-[10px] font-black text-natural-secondary mb-1">العدد الإجمالي</p>
+                                 <p className="text-2xl font-black text-natural-sidebar">{ct.length} <span className="text-[10px] text-natural-secondary">متدرب</span></p>
+                               </div>
+                               <div className="bg-natural-bg/50 p-5 rounded-3xl border border-natural-border">
+                                 <p className="text-[10px] font-black text-natural-secondary mb-1">نسبة الإشغال</p>
+                                 <p className="text-2xl font-black text-natural-sidebar">{Math.round(progress)}%</p>
+                               </div>
+                               <div className="bg-natural-bg/50 p-5 rounded-3xl border border-natural-border">
+                                 <p className="text-[10px] font-black text-natural-secondary mb-1">إجمالي الدخل</p>
+                                 <p className="text-2xl font-black text-natural-sidebar">{finalIncome.toLocaleString()} <span className="text-[10px] text-natural-secondary">ر.س</span></p>
+                               </div>
+                               <div className="bg-natural-bg/50 p-5 rounded-3xl border border-natural-border">
+                                 <p className="text-[10px] font-black text-natural-secondary mb-1">صافي الربح</p>
+                                 <div className="flex items-center gap-2">
+                                   <p className={`text-2xl font-black ${net >= 0 ? 'text-green-600' : 'text-red-600'}`}>{net.toLocaleString()} <span className="text-[10px] text-natural-secondary">ر.س</span></p>
+                                 </div>
+                               </div>
+                            </div>
+
+                            <div className="rounded-3xl border border-natural-sidebar/10 overflow-hidden shadow-sm">
+                                <div className="bg-natural-sidebar/5 p-4 border-b border-natural-sidebar/5">
+                                    <h4 className="font-black text-natural-sidebar text-sm flex items-center gap-2">
+                                        <Icons.TrendingUp size={16} className="text-natural-accent" />
+                                        الملخص المالي التفصيلي
+                                    </h4>
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-right">
+                                    <thead>
+                                      <tr className="bg-natural-sidebar/10 text-natural-sidebar text-[10px] uppercase font-black">
+                                        <th className="p-4 border-l border-natural-sidebar/5">العدد</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">السعر</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">الإجمالي</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">الخصم</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">دخول المتدربين</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">إجمالي المصاريف</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">إجمالي الربح</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">صافي الربح</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">للجمعية %</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">المستحق للجمعية</th>
+                                        <th className="p-4 border-l border-natural-sidebar/5">للمدربة %</th>
+                                        <th className="p-4">المستحق للمدربة</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-natural-sidebar/5 text-[11px] font-bold">
+                                      <tr>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center">{ct.length}</td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center">{courseBasePrice.toLocaleString()}</td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center">{potentialTotal.toLocaleString()}</td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center text-red-500">-{totalDiscount.toLocaleString()}</td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center font-black">{traineeInc.toLocaleString()}</td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center text-red-600">{totalExp.toLocaleString()}</td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center text-natural-accent">{(finalIncome).toLocaleString()}</td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center font-black text-green-600">{net.toLocaleString()}</td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center text-natural-secondary">{course.associationPercentage || '30'}%</td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center font-black">
+                                          {(net > 0 ? (net * (parseFloat(course.associationPercentage || '30') / 100)) : 0).toLocaleString()}
+                                        </td>
+                                        <td className="p-4 border-l border-natural-sidebar/5 text-center text-natural-secondary">{100 - parseFloat(course.associationPercentage || '30')}%</td>
+                                        <td className="p-4 text-center font-black text-natural-sidebar">
+                                          {(net > 0 ? (net * ((100 - parseFloat(course.associationPercentage || '30')) / 100)) : 0).toLocaleString()}
+                                        </td>
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-6">
+                                <button 
+                                  onClick={() => {
+                                      setSelectedAccountingCourseId(selectedReportCourse.id);
+                                      setView('courses_accounting');
+                                      setSelectedReportCourse(null);
+                                  }}
+                                  className="bg-natural-accent text-white px-8 py-3 rounded-2xl font-black shadow-lg shadow-natural-accent/20 flex items-center gap-2 hover:scale-105 transition-all text-sm"
+                                >
+                                    <Icons.ArrowLeft size={16} />
+                                    الانتقال للمحاسبة الكاملة
+                                </button>
+                                <button 
+                                  onClick={() => setSelectedReportCourse(null)}
+                                  className="bg-natural-bg text-natural-sidebar px-8 py-3 rounded-2xl font-black hover:bg-natural-border transition-all text-sm"
+                                >
+                                  إغلاق التقارير
+                                </button>
+                            </div>
+                          </div>
+                        );
+                    })()}
+                  </div>
+                </motion.div>
+              </div>
             )}
           </AnimatePresence>
 
